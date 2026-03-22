@@ -1,0 +1,15 @@
+package com.paymentplatform.commonlib.enums;
+
+public enum SagaStatus {
+    STARTED,
+    PAYMENT_STEP_STARTED,
+    PAYMENT_STEP_COMPLETED,
+    PAYMENT_STEP_FAILED,
+    INVENTORY_STEP_STARTED,
+    INVENTORY_STEP_COMPLETED,
+    INVENTORY_STEP_FAILED,
+    COMPENSATING,
+    COMPENSATED,
+    COMPLETED,
+    FAILED
+}

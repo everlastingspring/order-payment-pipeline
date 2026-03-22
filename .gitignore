@@ -1,0 +1,15 @@
+target/
+*.class
+*.jar
+*.war
+.idea/
+*.iml
+.DS_Store
+*.log
+.env
+*.env
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+

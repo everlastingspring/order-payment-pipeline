@@ -14,8 +14,11 @@ import com.paymentplatform.inventoryservice.application.mapper.InventoryMapper;
 import com.paymentplatform.inventoryservice.domain.entity.Inventory;
 import com.paymentplatform.inventoryservice.domain.entity.OutboxEvent;
 import com.paymentplatform.inventoryservice.domain.entity.OutboxStatus;
+import com.paymentplatform.inventoryservice.domain.entity.ReservationRecord;
+import com.paymentplatform.inventoryservice.domain.entity.ReservationStatus;
 import com.paymentplatform.inventoryservice.domain.repository.InventoryRepository;
 import com.paymentplatform.inventoryservice.domain.repository.OutboxEventRepository;
+import com.paymentplatform.inventoryservice.domain.repository.ReservationRecordRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,6 +35,7 @@ import java.util.UUID;
 public class InventoryService {
 
     private final InventoryRepository inventoryRepository;
+    private final ReservationRecordRepository reservationRecordRepository;
     private final OutboxEventRepository outboxEventRepository;
     private final InventoryMapper inventoryMapper;
     private final ObjectMapper objectMapper;
@@ -85,6 +89,15 @@ public class InventoryService {
             inventory.reserve(item.getQuantity());
             inventoryRepository.save(inventory);
 
+            // Track reservation for saga compensation (release on cancel)
+            ReservationRecord record = ReservationRecord.builder()
+                    .orderId(orderId)
+                    .productId(productId)
+                    .warehouseId(inventory.getWarehouseId())
+                    .quantity(item.getQuantity())
+                    .build();
+            reservationRecordRepository.save(record);
+
             reservedItems.add(InventoryReservedEvent.ReservedItem.builder()
                     .productId(item.getProductId())
                     .sku(inventory.getProduct().getSku())
@@ -99,18 +112,46 @@ public class InventoryService {
 
     /**
      * Releases previously reserved inventory when an order is cancelled.
-     * Saga compensation step.
+     * Saga compensation step — looks up reservation records saved during
+     * reserveInventory() and restores stock for each.
      */
     @Transactional
     public void releaseInventory(OrderCancelledEvent event) {
         String orderId = event.getOrderId();
         log.info("Releasing inventory for cancelled order: {}", orderId);
 
-        // We need to look up the original order items to know what to release.
-        // Since we don't store order items locally, we rely on the event data.
-        // For now, log the release. In a full implementation, we'd store
-        // reservation records to track what was reserved per order.
-        log.info("Inventory release completed for order: {} (compensation)", orderId);
+        List<ReservationRecord> activeReservations =
+                reservationRecordRepository.findByOrderIdAndStatus(orderId, ReservationStatus.ACTIVE);
+
+        if (activeReservations.isEmpty()) {
+            log.warn("No active reservations found for order: {} — nothing to release", orderId);
+            return;
+        }
+
+        int releasedCount = 0;
+        for (ReservationRecord reservation : activeReservations) {
+            Inventory inventory = inventoryRepository.findByProductIdWithProduct(reservation.getProductId())
+                    .orElse(null);
+
+            if (inventory == null) {
+                log.error("Inventory not found for productId={} during release for order={}",
+                        reservation.getProductId(), orderId);
+                continue;
+            }
+
+            inventory.release(reservation.getQuantity());
+            inventoryRepository.save(inventory);
+
+            reservation.release();
+            reservationRecordRepository.save(reservation);
+
+            releasedCount++;
+            log.debug("Released {} units of product {} for order {}",
+                    reservation.getQuantity(), reservation.getProductId(), orderId);
+        }
+
+        log.info("Inventory release completed for order: {} — {} items released (compensation)",
+                orderId, releasedCount);
     }
 
     // ── Read operations ──

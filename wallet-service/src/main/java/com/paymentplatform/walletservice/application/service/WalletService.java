@@ -12,6 +12,7 @@ import com.paymentplatform.walletservice.domain.repository.LedgerEntryRepository
 import com.paymentplatform.walletservice.domain.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -45,16 +46,8 @@ public class WalletService {
         BigDecimal amount = event.getAmount().getAmount();
         String currency = event.getAmount().getCurrency();
 
-        // Find or create wallet
-        Wallet wallet = walletRepository.findByCustomerId(customerId)
-                .orElseGet(() -> {
-                    log.info("Creating new wallet for customer: {}", customerId);
-                    Wallet newWallet = Wallet.builder()
-                            .customerId(customerId)
-                            .currency(currency)
-                            .build();
-                    return walletRepository.save(newWallet);
-                });
+        // Find or create wallet (handles concurrent creation race)
+        Wallet wallet = findOrCreateWallet(customerId, currency);
 
         // Idempotency check via ledger
         if (ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
@@ -65,15 +58,21 @@ public class WalletService {
         }
 
         // Append ledger entry (event sourcing: this IS the state change)
-        LedgerEntry entry = wallet.credit(
-                amount,
-                referenceId,
-                "Payment completed for order " + event.getOrderId()
-        );
+        try {
+            LedgerEntry entry = wallet.credit(
+                    amount,
+                    referenceId,
+                    "Payment completed for order " + event.getOrderId()
+            );
 
-        walletRepository.save(wallet);
-        log.info("Wallet credited: walletId={}, amount={} {}, newBalance={}, referenceId={}",
-                wallet.getId(), amount, currency, wallet.getBalance(), referenceId);
+            walletRepository.save(wallet);
+            log.info("Wallet credited: walletId={}, amount={} {}, newBalance={}, referenceId={}",
+                    wallet.getId(), amount, currency, wallet.getBalance(), referenceId);
+        } catch (DataIntegrityViolationException e) {
+            // Concurrent duplicate insert hit the unique constraint — treat as idempotent success
+            log.info("Duplicate credit caught by DB constraint: walletId={}, referenceId={}",
+                    wallet.getId(), referenceId);
+        }
     }
 
     // ── Read operations ──
@@ -99,6 +98,26 @@ public class WalletService {
         }
         return ledgerEntryRepository.findByWalletIdOrderByOccurredAtDesc(walletId, pageable)
                 .map(walletMapper::toEntryDto);
+    }
+
+    private Wallet findOrCreateWallet(String customerId, String currency) {
+        return walletRepository.findByCustomerId(customerId)
+                .orElseGet(() -> {
+                    try {
+                        log.info("Creating new wallet for customer: {}", customerId);
+                        Wallet newWallet = Wallet.builder()
+                                .customerId(customerId)
+                                .currency(currency)
+                                .build();
+                        return walletRepository.save(newWallet);
+                    } catch (DataIntegrityViolationException e) {
+                        // Another thread created the wallet concurrently — fetch it
+                        log.info("Wallet already created concurrently for customer: {}", customerId);
+                        return walletRepository.findByCustomerId(customerId)
+                                .orElseThrow(() -> new IllegalStateException(
+                                        "Wallet creation race condition: wallet disappeared for customer " + customerId));
+                    }
+                });
     }
 
     /**

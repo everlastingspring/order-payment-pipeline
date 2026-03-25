@@ -1,5 +1,6 @@
 package com.paymentplatform.inventoryservice.infrastructure.kafka;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentplatform.commonlib.constants.KafkaTopics;
 import com.paymentplatform.commonlib.events.OrderCancelledEvent;
 import com.paymentplatform.commonlib.events.OrderCreatedEvent;
@@ -21,24 +22,24 @@ import org.springframework.stereotype.Component;
 public class OrderEventConsumer {
 
     private final InventoryService inventoryService;
+    private final ObjectMapper objectMapper;
 
     @KafkaListener(
             topics = KafkaTopics.ORDER_CREATED,
             groupId = "inventory-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void handleOrderCreated(OrderCreatedEvent event, Acknowledgment ack) {
-        log.info("Received order.created: orderId={}, items={}",
-                event.getOrderId(), event.getItems().size());
-
+    public void handleOrderCreated(String payload, Acknowledgment ack) {
         try {
+            OrderCreatedEvent event = objectMapper.readValue(payload, OrderCreatedEvent.class);
+            log.info("Received order.created: orderId={}, items={}",
+                    event.getOrderId(), event.getItems().size());
             inventoryService.reserveInventory(event);
             ack.acknowledge();
             log.info("order.created processed and acknowledged: orderId={}", event.getOrderId());
         } catch (Exception e) {
-            log.error("Failed to process order.created: orderId={}, error={}",
-                    event.getOrderId(), e.getMessage(), e);
-            throw e;
+            log.error("Failed to process order.created: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
         }
     }
 
@@ -47,18 +48,17 @@ public class OrderEventConsumer {
             groupId = "inventory-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void handleOrderCancelled(OrderCancelledEvent event, Acknowledgment ack) {
-        log.info("Received order.cancelled: orderId={}, reason={}",
-                event.getOrderId(), event.getCancellationReason());
-
+    public void handleOrderCancelled(String payload, Acknowledgment ack) {
         try {
+            OrderCancelledEvent event = objectMapper.readValue(payload, OrderCancelledEvent.class);
+            log.info("Received order.cancelled: orderId={}, reason={}",
+                    event.getOrderId(), event.getCancellationReason());
             inventoryService.releaseInventory(event);
             ack.acknowledge();
             log.info("order.cancelled processed and acknowledged: orderId={}", event.getOrderId());
         } catch (Exception e) {
-            log.error("Failed to process order.cancelled: orderId={}, error={}",
-                    event.getOrderId(), e.getMessage(), e);
-            throw e;
+            log.error("Failed to process order.cancelled: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
         }
     }
 }

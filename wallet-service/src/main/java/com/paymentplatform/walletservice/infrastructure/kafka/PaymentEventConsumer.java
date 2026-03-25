@@ -1,5 +1,6 @@
 package com.paymentplatform.walletservice.infrastructure.kafka;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentplatform.commonlib.constants.KafkaTopics;
 import com.paymentplatform.commonlib.events.PaymentCompletedEvent;
 import com.paymentplatform.walletservice.application.service.WalletService;
@@ -21,25 +22,25 @@ import org.springframework.stereotype.Component;
 public class PaymentEventConsumer {
 
     private final WalletService walletService;
+    private final ObjectMapper objectMapper;
 
     @KafkaListener(
             topics = KafkaTopics.PAYMENT_COMPLETED,
             groupId = "wallet-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void handlePaymentCompleted(PaymentCompletedEvent event, Acknowledgment ack) {
-        log.info("Received payment.completed: paymentId={}, orderId={}, amount={} {}",
-                event.getPaymentId(), event.getOrderId(),
-                event.getAmount().getAmount(), event.getAmount().getCurrency());
-
+    public void handlePaymentCompleted(String payload, Acknowledgment ack) {
         try {
+            PaymentCompletedEvent event = objectMapper.readValue(payload, PaymentCompletedEvent.class);
+            log.info("Received payment.completed: paymentId={}, orderId={}, amount={} {}",
+                    event.getPaymentId(), event.getOrderId(),
+                    event.getAmount().getAmount(), event.getAmount().getCurrency());
             walletService.creditFromPayment(event);
             ack.acknowledge();
             log.info("payment.completed processed and acknowledged: paymentId={}", event.getPaymentId());
         } catch (Exception e) {
-            log.error("Failed to process payment.completed: paymentId={}, error={}",
-                    event.getPaymentId(), e.getMessage(), e);
-            throw e;
+            log.error("Failed to process payment.completed: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
         }
     }
 }

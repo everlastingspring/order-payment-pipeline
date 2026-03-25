@@ -1,5 +1,6 @@
 package com.paymentplatform.notificationservice.infrastructure.kafka;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentplatform.commonlib.constants.KafkaTopics;
 import com.paymentplatform.commonlib.enums.NotificationType;
 import com.paymentplatform.commonlib.events.*;
@@ -20,15 +21,17 @@ import org.springframework.stereotype.Component;
 public class EventConsumer {
 
     private final NotificationService notificationService;
+    private final ObjectMapper objectMapper;
 
     @KafkaListener(
             topics = KafkaTopics.ORDER_CREATED,
             groupId = "notification-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void handleOrderCreated(OrderCreatedEvent event, Acknowledgment ack) {
-        log.info("Received order.created: orderId={}", event.getOrderId());
+    public void handleOrderCreated(String payload, Acknowledgment ack) {
         try {
+            OrderCreatedEvent event = objectMapper.readValue(payload, OrderCreatedEvent.class);
+            log.info("Received order.created: orderId={}", event.getOrderId());
             notificationService.sendNotification(
                     event.getCustomerId(),
                     event.getCustomerEmail(),
@@ -42,7 +45,7 @@ public class EventConsumer {
             ack.acknowledge();
         } catch (Exception e) {
             log.error("Failed to process order.created notification: {}", e.getMessage(), e);
-            throw e;
+            throw new RuntimeException(e);
         }
     }
 
@@ -51,9 +54,10 @@ public class EventConsumer {
             groupId = "notification-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void handlePaymentCompleted(PaymentCompletedEvent event, Acknowledgment ack) {
-        log.info("Received payment.completed: orderId={}, paymentId={}", event.getOrderId(), event.getPaymentId());
+    public void handlePaymentCompleted(String payload, Acknowledgment ack) {
         try {
+            PaymentCompletedEvent event = objectMapper.readValue(payload, PaymentCompletedEvent.class);
+            log.info("Received payment.completed: orderId={}, paymentId={}", event.getOrderId(), event.getPaymentId());
             notificationService.sendNotification(
                     event.getCustomerId(),
                     null, // will be resolved from order context if needed
@@ -67,7 +71,7 @@ public class EventConsumer {
             ack.acknowledge();
         } catch (Exception e) {
             log.error("Failed to process payment.completed notification: {}", e.getMessage(), e);
-            throw e;
+            throw new RuntimeException(e);
         }
     }
 
@@ -76,9 +80,10 @@ public class EventConsumer {
             groupId = "notification-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void handlePaymentFailed(PaymentFailedEvent event, Acknowledgment ack) {
-        log.info("Received payment.failed: orderId={}", event.getOrderId());
+    public void handlePaymentFailed(String payload, Acknowledgment ack) {
         try {
+            PaymentFailedEvent event = objectMapper.readValue(payload, PaymentFailedEvent.class);
+            log.info("Received payment.failed: orderId={}", event.getOrderId());
             notificationService.sendNotification(
                     event.getCustomerId(),
                     null,
@@ -92,7 +97,7 @@ public class EventConsumer {
             ack.acknowledge();
         } catch (Exception e) {
             log.error("Failed to process payment.failed notification: {}", e.getMessage(), e);
-            throw e;
+            throw new RuntimeException(e);
         }
     }
 
@@ -101,9 +106,10 @@ public class EventConsumer {
             groupId = "notification-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void handleOrderCompleted(OrderCompletedEvent event, Acknowledgment ack) {
-        log.info("Received order.completed: orderId={}", event.getOrderId());
+    public void handleOrderCompleted(String payload, Acknowledgment ack) {
         try {
+            OrderCompletedEvent event = objectMapper.readValue(payload, OrderCompletedEvent.class);
+            log.info("Received order.completed: orderId={}", event.getOrderId());
             notificationService.sendNotification(
                     event.getCustomerId(),
                     event.getCustomerEmail(),
@@ -117,7 +123,7 @@ public class EventConsumer {
             ack.acknowledge();
         } catch (Exception e) {
             log.error("Failed to process order.completed notification: {}", e.getMessage(), e);
-            throw e;
+            throw new RuntimeException(e);
         }
     }
 
@@ -126,9 +132,10 @@ public class EventConsumer {
             groupId = "notification-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void handleOrderCancelled(OrderCancelledEvent event, Acknowledgment ack) {
-        log.info("Received order.cancelled: orderId={}", event.getOrderId());
+    public void handleOrderCancelled(String payload, Acknowledgment ack) {
         try {
+            OrderCancelledEvent event = objectMapper.readValue(payload, OrderCancelledEvent.class);
+            log.info("Received order.cancelled: orderId={}", event.getOrderId());
             notificationService.sendNotification(
                     event.getCustomerId(),
                     event.getCustomerEmail(),
@@ -142,7 +149,7 @@ public class EventConsumer {
             ack.acknowledge();
         } catch (Exception e) {
             log.error("Failed to process order.cancelled notification: {}", e.getMessage(), e);
-            throw e;
+            throw new RuntimeException(e);
         }
     }
 

@@ -1,5 +1,6 @@
 package com.paymentplatform.paymentservice.infrastructure.kafka;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentplatform.commonlib.constants.KafkaTopics;
 import com.paymentplatform.commonlib.events.OrderCreatedEvent;
 import com.paymentplatform.paymentservice.application.service.PaymentService;
@@ -21,25 +22,25 @@ import org.springframework.stereotype.Component;
 public class OrderEventConsumer {
 
     private final PaymentService paymentService;
+    private final ObjectMapper objectMapper;
 
     @KafkaListener(
             topics = KafkaTopics.ORDER_CREATED,
             groupId = "payment-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void handleOrderCreated(OrderCreatedEvent event, Acknowledgment ack) {
-        log.info("Received order.created: orderId={}, customerId={}, amount={}",
-                event.getOrderId(), event.getCustomerId(), event.getTotalAmount());
-
+    public void handleOrderCreated(String payload, Acknowledgment ack) {
         try {
+            OrderCreatedEvent event = objectMapper.readValue(payload, OrderCreatedEvent.class);
+            log.info("Received order.created: orderId={}, customerId={}, amount={}",
+                    event.getOrderId(), event.getCustomerId(), event.getTotalAmount());
             paymentService.processPayment(event);
             ack.acknowledge();
             log.info("order.created processed and acknowledged: orderId={}", event.getOrderId());
         } catch (Exception e) {
-            log.error("Failed to process order.created: orderId={}, error={}",
-                    event.getOrderId(), e.getMessage(), e);
+            log.error("Failed to process order.created: {}", e.getMessage(), e);
             // Don't ack — Kafka will redeliver
-            throw e;
+            throw new RuntimeException(e);
         }
     }
 }

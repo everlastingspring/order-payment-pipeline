@@ -1,5 +1,6 @@
 package com.paymentplatform.orderservice.infrastructure.kafka;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentplatform.commonlib.constants.KafkaTopics;
 import com.paymentplatform.commonlib.events.InventoryFailedEvent;
 import com.paymentplatform.commonlib.events.InventoryReservedEvent;
@@ -16,22 +17,23 @@ import org.springframework.stereotype.Component;
 public class InventoryEventConsumer {
 
     private final OrderSagaManager sagaManager;
+    private final ObjectMapper objectMapper;
 
     @KafkaListener(
             topics = KafkaTopics.INVENTORY_RESERVED,
             groupId = "order-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void onInventoryReserved(InventoryReservedEvent event, Acknowledgment ack) {
-        log.info("Received inventory.reserved: orderId={}, reservationId={}",
-                event.getOrderId(), event.getReservationId());
+    public void onInventoryReserved(String payload, Acknowledgment ack) {
         try {
+            InventoryReservedEvent event = objectMapper.readValue(payload, InventoryReservedEvent.class);
+            log.info("Received inventory.reserved: orderId={}, reservationId={}",
+                    event.getOrderId(), event.getReservationId());
             sagaManager.handleInventoryReserved(event);
             ack.acknowledge();
         } catch (Exception e) {
-            log.error("Error processing inventory.reserved for order {}: {}",
-                    event.getOrderId(), e.getMessage(), e);
-            throw e;
+            log.error("Error processing inventory.reserved: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
         }
     }
 
@@ -40,16 +42,16 @@ public class InventoryEventConsumer {
             groupId = "order-service-group",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void onInventoryFailed(InventoryFailedEvent event, Acknowledgment ack) {
-        log.info("Received inventory.failed: orderId={}, reason={}",
-                event.getOrderId(), event.getFailureReason());
+    public void onInventoryFailed(String payload, Acknowledgment ack) {
         try {
+            InventoryFailedEvent event = objectMapper.readValue(payload, InventoryFailedEvent.class);
+            log.info("Received inventory.failed: orderId={}, reason={}",
+                    event.getOrderId(), event.getFailureReason());
             sagaManager.handleInventoryFailed(event);
             ack.acknowledge();
         } catch (Exception e) {
-            log.error("Error processing inventory.failed for order {}: {}",
-                    event.getOrderId(), e.getMessage(), e);
-            throw e;
+            log.error("Error processing inventory.failed: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
         }
     }
 }

@@ -6,6 +6,7 @@ public enum NotificationType {
     PAYMENT_FAILURE,
     ORDER_SHIPPED,
     ORDER_CANCELLED,
+    ORDER_FAILED,
     WALLET_CREDITED,
     WALLET_DEBITED
 }

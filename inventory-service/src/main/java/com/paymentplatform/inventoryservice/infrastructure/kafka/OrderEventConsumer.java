@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentplatform.commonlib.constants.KafkaTopics;
 import com.paymentplatform.commonlib.events.OrderCancelledEvent;
 import com.paymentplatform.commonlib.events.OrderCreatedEvent;
+import com.paymentplatform.commonlib.events.OrderFailedEvent;
 import com.paymentplatform.inventoryservice.application.service.InventoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,8 +14,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * Consumes order events relevant to inventory:
- *  - order.created  → reserve stock for each item
- *  - order.cancelled → release previously reserved stock
+ *  - order.created   → reserve stock for each item
+ *  - order.cancelled → release reserved stock (explicit user cancel)
+ *  - order.failed    → release reserved stock (saga failure: payment declined etc.)
  */
 @Component
 @RequiredArgsConstructor
@@ -58,6 +60,29 @@ public class OrderEventConsumer {
             log.info("order.cancelled processed and acknowledged: orderId={}", event.getOrderId());
         } catch (Exception e) {
             log.error("Failed to process order.cancelled: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    @KafkaListener(
+            topics = KafkaTopics.ORDER_FAILED,
+            groupId = "inventory-service-group",
+            containerFactory = "kafkaListenerContainerFactory"
+    )
+    public void handleOrderFailed(String payload, Acknowledgment ack) {
+        try {
+            OrderFailedEvent event = objectMapper.readValue(payload, OrderFailedEvent.class);
+            log.info("Received order.failed: orderId={}, failedStep={}, reason={}",
+                    event.getOrderId(), event.getFailedStep(), event.getFailureReason());
+            // Only release if payment step failed — inventory was reserved but payment declined.
+            // If inventory step failed, stock was never reserved so nothing to release.
+            if ("PAYMENT".equals(event.getFailedStep())) {
+                inventoryService.releaseInventoryByOrderId(event.getOrderId());
+            }
+            ack.acknowledge();
+            log.info("order.failed processed and acknowledged: orderId={}", event.getOrderId());
+        } catch (Exception e) {
+            log.error("Failed to process order.failed: {}", e.getMessage(), e);
             throw new RuntimeException(e);
         }
     }

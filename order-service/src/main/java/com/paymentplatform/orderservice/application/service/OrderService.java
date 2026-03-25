@@ -8,6 +8,7 @@ import com.paymentplatform.commonlib.dto.OrderDto;
 import com.paymentplatform.commonlib.enums.OrderStatus;
 import com.paymentplatform.commonlib.enums.SagaStatus;
 import com.paymentplatform.commonlib.events.OrderCreatedEvent;
+import com.paymentplatform.commonlib.events.OrderFailedEvent;
 import com.paymentplatform.commonlib.exception.InvalidOrderStateException;
 import com.paymentplatform.commonlib.exception.ResourceNotFoundException;
 import com.paymentplatform.orderservice.api.dto.CreateOrderRequest;
@@ -111,7 +112,10 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
 
-        if (order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.CANCELLED) {
+        if (order.getStatus() == OrderStatus.CONFIRMED
+                || order.getStatus() == OrderStatus.COMPLETED
+                || order.getStatus() == OrderStatus.CANCELLED
+                || order.getStatus() == OrderStatus.FAILED) {
             throw new InvalidOrderStateException(
                     orderId.toString(), order.getStatus(), OrderStatus.CANCELLED);
         }
@@ -156,6 +160,17 @@ public class OrderService {
                         : MoneyDto.builder().amount(BigDecimal.ZERO).currency(order.getCurrency()).build())
                 .build();
         saveOutboxEvent(order.getId().toString(), KafkaTopics.ORDER_CANCELLED, event);
+    }
+
+    public void publishOrderFailed(Order order, String failureReason, String failedStep) {
+        var event = OrderFailedEvent.builder()
+                .orderId(order.getId().toString())
+                .customerId(order.getCustomerId())
+                .customerEmail(order.getCustomerEmail())
+                .failureReason(failureReason)
+                .failedStep(failedStep)
+                .build();
+        saveOutboxEvent(order.getId().toString(), KafkaTopics.ORDER_FAILED, event);
     }
 
     public void publishOrderCompleted(Order order) {

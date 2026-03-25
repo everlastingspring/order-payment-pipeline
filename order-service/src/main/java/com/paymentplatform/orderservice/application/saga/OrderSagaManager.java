@@ -15,12 +15,15 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.UUID;
 
 /**
- * Handles saga state transitions for the order lifecycle.
+ * Sequential choreography saga for the order lifecycle.
  *
- * Parallel choreography: both payment-service and inventory-service
- * react to order.created independently. This manager joins the results:
- *  - Both succeed → CONFIRMED → publish order.completed
- *  - Either fails → CANCELLED → publish order.cancelled (triggers compensation)
+ * Step 1: order.created    → inventory-service reserves stock → inventory.reserved
+ * Step 2: inventory.reserved → payment-service charges       → payment.completed / payment.failed
+ * Step 3: payment.completed → this manager → order CONFIRMED  → order.completed
+ *
+ * Failure paths:
+ *   inventory.failed  → order FAILED (no payment was attempted)
+ *   payment.failed    → order FAILED → order.failed (inventory-service releases stock)
  */
 @Component
 @RequiredArgsConstructor
@@ -30,90 +33,109 @@ public class OrderSagaManager {
     private final OrderRepository orderRepository;
     private final OrderService orderService;
 
+    /**
+     * Step 1 complete: inventory reserved.
+     * Update order status to INVENTORY_RESERVED — payment-service will now process the payment.
+     */
+    @Transactional
+    public void handleInventoryReserved(InventoryReservedEvent event) {
+        Order order = findOrder(event.getOrderId());
+
+        if (isFinalState(order.getStatus())) {
+            log.warn("inventory.reserved received for order already in final state {}: {}",
+                    order.getStatus(), event.getOrderId());
+            return;
+        }
+
+        order.setInventoryReserved(true);
+        order.setStatus(OrderStatus.INVENTORY_RESERVED);
+        order.setSagaStatus(SagaStatus.INVENTORY_STEP_COMPLETED);
+        orderRepository.save(order);
+
+        log.info("Inventory reserved for order: {} — awaiting payment", event.getOrderId());
+    }
+
+    /**
+     * Step 2 complete: payment succeeded.
+     * Mark order CONFIRMED and publish order.completed.
+     * No parallel join needed — payment fires only after inventory.reserved.
+     */
     @Transactional
     public void handlePaymentCompleted(PaymentCompletedEvent event) {
         Order order = findOrder(event.getOrderId());
 
-        if (order.getStatus() == OrderStatus.CANCELLED) {
-            log.warn("Payment completed for already cancelled order: {}", event.getOrderId());
+        if (isFinalState(order.getStatus())) {
+            log.warn("payment.completed received for order already in final state {}: {}",
+                    order.getStatus(), event.getOrderId());
             return;
         }
 
         order.setPaymentCompleted(true);
         order.setPaymentId(event.getPaymentId());
-        order.setSagaStatus(SagaStatus.PAYMENT_STEP_COMPLETED);
-        log.info("Payment completed for order: {}", event.getOrderId());
-
-        checkSagaCompletion(order);
-    }
-
-    @Transactional
-    public void handlePaymentFailed(PaymentFailedEvent event) {
-        Order order = findOrder(event.getOrderId());
-
-        if (order.getStatus() == OrderStatus.CANCELLED) {
-            log.warn("Payment failed event for already cancelled order: {}", event.getOrderId());
-            return;
-        }
-
-        order.setSagaStatus(SagaStatus.PAYMENT_STEP_FAILED);
-        order.setStatus(OrderStatus.CANCELLED);
-        order.setSagaStatus(SagaStatus.COMPENSATING);
+        order.setStatus(OrderStatus.CONFIRMED);
+        order.setSagaStatus(SagaStatus.COMPLETED);
         orderRepository.save(order);
 
-        log.info("Payment failed for order: {}, reason: {}", event.getOrderId(), event.getFailureReason());
-
-        orderService.publishOrderCancelled(order,
-                "Payment failed: " + event.getFailureReason(), "SAGA_COMPENSATION");
+        log.info("Saga completed — order confirmed: {}", event.getOrderId());
+        orderService.publishOrderCompleted(order);
     }
 
-    @Transactional
-    public void handleInventoryReserved(InventoryReservedEvent event) {
-        Order order = findOrder(event.getOrderId());
-
-        if (order.getStatus() == OrderStatus.CANCELLED) {
-            log.warn("Inventory reserved for already cancelled order: {}", event.getOrderId());
-            return;
-        }
-
-        order.setInventoryReserved(true);
-        order.setSagaStatus(SagaStatus.INVENTORY_STEP_COMPLETED);
-        log.info("Inventory reserved for order: {}", event.getOrderId());
-
-        checkSagaCompletion(order);
-    }
-
+    /**
+     * Inventory failed — out of stock or product not found.
+     * No payment was attempted. Mark FAILED and publish order.failed.
+     */
     @Transactional
     public void handleInventoryFailed(InventoryFailedEvent event) {
         Order order = findOrder(event.getOrderId());
 
-        if (order.getStatus() == OrderStatus.CANCELLED) {
-            log.warn("Inventory failed event for already cancelled order: {}", event.getOrderId());
+        if (isFinalState(order.getStatus())) {
+            log.warn("inventory.failed received for order already in final state {}: {}",
+                    order.getStatus(), event.getOrderId());
             return;
         }
 
-        order.setSagaStatus(SagaStatus.INVENTORY_STEP_FAILED);
-        order.setStatus(OrderStatus.CANCELLED);
-        order.setSagaStatus(SagaStatus.COMPENSATING);
+        order.setStatus(OrderStatus.FAILED);
+        order.setSagaStatus(SagaStatus.FAILED);
         orderRepository.save(order);
 
-        log.info("Inventory reservation failed for order: {}, reason: {}", event.getOrderId(), event.getFailureReason());
+        log.info("Inventory reservation failed for order: {}, reason: {}",
+                event.getOrderId(), event.getFailureReason());
 
-        orderService.publishOrderCancelled(order,
-                "Inventory reservation failed: " + event.getFailureReason(), "SAGA_COMPENSATION");
+        orderService.publishOrderFailed(order,
+                "Inventory unavailable: " + event.getFailureReason(), "INVENTORY");
     }
 
-    private void checkSagaCompletion(Order order) {
-        if (order.isPaymentCompleted() && order.isInventoryReserved()) {
-            order.setStatus(OrderStatus.CONFIRMED);
-            order.setSagaStatus(SagaStatus.COMPLETED);
-            orderRepository.save(order);
+    /**
+     * Payment failed — gateway declined or error.
+     * Inventory was already reserved — publish order.failed so inventory-service can release it.
+     */
+    @Transactional
+    public void handlePaymentFailed(PaymentFailedEvent event) {
+        Order order = findOrder(event.getOrderId());
 
-            log.info("Saga completed — order confirmed: {}", order.getId());
-            orderService.publishOrderCompleted(order);
-        } else {
-            orderRepository.save(order);
+        if (isFinalState(order.getStatus())) {
+            log.warn("payment.failed received for order already in final state {}: {}",
+                    order.getStatus(), event.getOrderId());
+            return;
         }
+
+        order.setStatus(OrderStatus.FAILED);
+        order.setSagaStatus(SagaStatus.FAILED);
+        orderRepository.save(order);
+
+        log.info("Payment failed for order: {}, reason: {}",
+                event.getOrderId(), event.getFailureReason());
+
+        // Inventory WAS reserved — publish order.failed so inventory-service releases it
+        orderService.publishOrderFailed(order,
+                "Payment declined: " + event.getFailureReason(), "PAYMENT");
+    }
+
+    private boolean isFinalState(OrderStatus status) {
+        return status == OrderStatus.CONFIRMED
+                || status == OrderStatus.COMPLETED
+                || status == OrderStatus.CANCELLED
+                || status == OrderStatus.FAILED;
     }
 
     private Order findOrder(String orderId) {

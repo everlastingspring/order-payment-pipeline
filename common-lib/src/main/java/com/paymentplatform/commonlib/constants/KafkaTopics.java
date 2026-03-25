@@ -11,5 +11,6 @@ public final class KafkaTopics {
     public static final String INVENTORY_FAILED    = "inventory.failed";
     public static final String ORDER_COMPLETED     = "order.completed";
     public static final String ORDER_CANCELLED     = "order.cancelled";
+    public static final String ORDER_FAILED        = "order.failed";
     public static final String NOTIFICATION_DLQ    = "notification.dlq";
 }

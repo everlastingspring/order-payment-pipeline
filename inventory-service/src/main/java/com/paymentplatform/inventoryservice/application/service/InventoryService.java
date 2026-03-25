@@ -107,7 +107,7 @@ public class InventoryService {
         }
 
         log.info("Inventory reserved for order {}: {} items", orderId, reservedItems.size());
-        publishInventoryReserved(orderId, reservedItems);
+        publishInventoryReserved(orderId, reservedItems, event);
     }
 
     /**
@@ -172,15 +172,60 @@ public class InventoryService {
 
     // ── Outbox event helpers ──
 
-    private void publishInventoryReserved(String orderId, List<InventoryReservedEvent.ReservedItem> items) {
+    private void publishInventoryReserved(String orderId, List<InventoryReservedEvent.ReservedItem> items,
+                                          OrderCreatedEvent orderEvent) {
         InventoryReservedEvent event = InventoryReservedEvent.builder()
                 .orderId(orderId)
                 .reservedItems(items)
                 .reservedAt(Instant.now())
-                .expiresAt(Instant.now().plusSeconds(900)) // 15 min reservation window
+                .expiresAt(Instant.now().plusSeconds(300)) // 5 min reservation window (testing)
+                // Payment passthrough — payment-service will charge after consuming this event
+                .customerId(orderEvent.getCustomerId())
+                .customerEmail(orderEvent.getCustomerEmail())
+                .totalAmount(orderEvent.getTotalAmount())
+                .paymentMethod(orderEvent.getPaymentMethod())
                 .build();
 
         saveOutboxEvent(orderId, KafkaTopics.INVENTORY_RESERVED, event);
+    }
+
+    /**
+     * Releases reserved inventory for a failed order (saga compensation).
+     * Safe to call even if no reservation exists — it will just log a warning.
+     */
+    @Transactional
+    public void releaseInventoryByOrderId(String orderId) {
+        log.info("Releasing inventory for failed order: {}", orderId);
+
+        List<ReservationRecord> activeReservations =
+                reservationRecordRepository.findByOrderIdAndStatus(orderId, ReservationStatus.ACTIVE);
+
+        if (activeReservations.isEmpty()) {
+            log.warn("No active reservations found for order: {} — nothing to release", orderId);
+            return;
+        }
+
+        int releasedCount = 0;
+        for (ReservationRecord reservation : activeReservations) {
+            Inventory inventory = inventoryRepository.findByProductIdWithProduct(reservation.getProductId())
+                    .orElse(null);
+
+            if (inventory == null) {
+                log.error("Inventory not found for productId={} during release for failed order={}",
+                        reservation.getProductId(), orderId);
+                continue;
+            }
+
+            inventory.release(reservation.getQuantity());
+            inventoryRepository.save(inventory);
+
+            reservation.release();
+            reservationRecordRepository.save(reservation);
+            releasedCount++;
+        }
+
+        log.info("Inventory release completed for failed order: {} — {} items released",
+                orderId, releasedCount);
     }
 
     private void publishInventoryFailed(String orderId, List<InventoryFailedEvent.FailedItem> items) {

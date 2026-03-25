@@ -153,6 +153,32 @@ public class EventConsumer {
         }
     }
 
+    @KafkaListener(
+            topics = KafkaTopics.ORDER_FAILED,
+            groupId = "notification-service-group",
+            containerFactory = "kafkaListenerContainerFactory"
+    )
+    public void handleOrderFailed(String payload, Acknowledgment ack) {
+        try {
+            OrderFailedEvent event = objectMapper.readValue(payload, OrderFailedEvent.class);
+            log.info("Received order.failed: orderId={}, failedStep={}", event.getOrderId(), event.getFailedStep());
+            notificationService.sendNotification(
+                    event.getCustomerId(),
+                    event.getCustomerEmail(),
+                    NotificationType.ORDER_FAILED,
+                    "Order Failed — #" + event.getOrderId().substring(0, 8),
+                    buildOrderFailedBody(event),
+                    event.getOrderId(),
+                    KafkaTopics.ORDER_FAILED,
+                    event.getEventId() != null ? event.getEventId().toString() : null
+            );
+            ack.acknowledge();
+        } catch (Exception e) {
+            log.error("Failed to process order.failed notification: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
+        }
+    }
+
     // ── Email body builders ──
 
     private String buildOrderCreatedBody(OrderCreatedEvent e) {
@@ -180,5 +206,11 @@ public class EventConsumer {
     private String buildOrderCancelledBody(OrderCancelledEvent e) {
         return String.format("Your order #%s has been cancelled. Reason: %s",
                 e.getOrderId().substring(0, 8), e.getCancellationReason());
+    }
+
+    private String buildOrderFailedBody(OrderFailedEvent e) {
+        return String.format("We're sorry, your order #%s could not be completed. Reason: %s. "
+                        + "No payment has been charged.",
+                e.getOrderId().substring(0, 8), e.getFailureReason());
     }
 }

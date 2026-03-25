@@ -6,7 +6,7 @@ import com.paymentplatform.commonlib.constants.KafkaTopics;
 import com.paymentplatform.commonlib.dto.MoneyDto;
 import com.paymentplatform.commonlib.dto.PaymentDto;
 import com.paymentplatform.commonlib.enums.PaymentStatus;
-import com.paymentplatform.commonlib.events.OrderCreatedEvent;
+import com.paymentplatform.commonlib.events.InventoryReservedEvent;
 import com.paymentplatform.commonlib.events.PaymentCompletedEvent;
 import com.paymentplatform.commonlib.events.PaymentFailedEvent;
 import com.paymentplatform.commonlib.exception.ResourceNotFoundException;
@@ -36,10 +36,10 @@ import java.util.UUID;
 /**
  * Core payment processing service.
  *
- * Flow when order.created is consumed:
+ * Sequential saga flow — triggered by inventory.reserved (NOT order.created):
  *   1. Acquire Redis distributed lock on orderId (prevents concurrent processing)
  *   2. Check idempotency_keys table (prevents double charge on redelivery)
- *   3. Create Payment entity (status=INITIATED)
+ *   3. Create Payment entity (status=PROCESSING)
  *   4. Call gateway simulator (charge)
  *   5. Update Payment (COMPLETED or FAILED)
  *   6. Save outbox event (payment.completed or payment.failed)
@@ -66,10 +66,11 @@ public class PaymentService {
     private long idempotencyTtlSeconds;
 
     /**
-     * Processes a payment triggered by an order.created event.
+     * Processes a payment triggered by an inventory.reserved event.
+     * Sequential saga: inventory must be reserved before payment is attempted.
      * This is the main entry point called by OrderEventConsumer.
      */
-    public void processPayment(OrderCreatedEvent event) {
+    public void processPayment(InventoryReservedEvent event) {
         String orderId = event.getOrderId();
         String idempotencyKeyValue = "order:" + orderId;
 
@@ -90,8 +91,7 @@ public class PaymentService {
         }
 
         try {
-            // Double-check idempotency inside the lock (another instance may have
-            // completed between our first check and lock acquisition)
+            // Double-check idempotency inside the lock
             var recheck = idempotencyKeyRepository.findByKey(idempotencyKeyValue);
             if (recheck.isPresent() && !recheck.get().isExpired()) {
                 log.info("Idempotent duplicate detected after lock: orderId={}", orderId);
@@ -111,10 +111,10 @@ public class PaymentService {
      * The transactional core: creates payment, charges gateway, saves result + outbox event.
      */
     @Transactional
-    protected void executePayment(OrderCreatedEvent event, String idempotencyKeyValue) {
+    protected void executePayment(InventoryReservedEvent event, String idempotencyKeyValue) {
         String orderId = event.getOrderId();
 
-        // Create payment record
+        // Create payment record using fields carried from OrderCreatedEvent via inventory.reserved
         Payment payment = Payment.builder()
                 .orderId(orderId)
                 .customerId(event.getCustomerId())

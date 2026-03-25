@@ -12,7 +12,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -44,6 +46,8 @@ public class OutboxProcessor {
         }
 
         int published = 0;
+        List<OutboxEvent> publishedEvents = new ArrayList<>();
+
         for (OutboxEvent event : events) {
             try {
                 kafkaEventPublisher.publish(event.getTopic(), event.getAggregateId(), event.getPayload())
@@ -51,13 +55,17 @@ public class OutboxProcessor {
                 event.markPublished();
                 outboxEventRepository.save(event);
                 published++;
+                publishedEvents.add(event);
+                log.info("Outbox → topic={} | eventType={} | aggregateId={}",
+                        event.getTopic(), event.getEventType(), event.getAggregateId());
             } catch (Exception e) {
-                log.error("Failed to publish outbox event: id={}, topic={}, attempt={}",
-                        event.getId(), event.getTopic(), event.getRetryCount() + 1, e);
+                log.error("Failed to publish outbox event: id={}, topic={}, eventType={}, attempt={}/{}",
+                        event.getId(), event.getTopic(), event.getEventType(),
+                        event.getRetryCount() + 1, MAX_RETRY_COUNT, e);
                 event.markFailed();
                 if (event.getRetryCount() >= MAX_RETRY_COUNT) {
-                    log.error("Outbox event permanently failed after {} retries: id={}",
-                            MAX_RETRY_COUNT, event.getId());
+                    log.error("Outbox event permanently failed after {} retries: id={}, eventType={}",
+                            MAX_RETRY_COUNT, event.getId(), event.getEventType());
                 } else {
                     event.retry(); // reset to PENDING for next poll
                 }
@@ -66,7 +74,12 @@ public class OutboxProcessor {
         }
 
         if (published > 0) {
-            log.info("Outbox: published {}/{} events", published, events.size());
+            String breakdown = publishedEvents.stream()
+                    .collect(Collectors.groupingBy(OutboxEvent::getTopic, Collectors.counting()))
+                    .entrySet().stream()
+                    .map(e -> e.getKey() + " ×" + e.getValue())
+                    .collect(Collectors.joining(", "));
+            log.info("Outbox: published {}/{} events [{}]", published, events.size(), breakdown);
         }
     }
 

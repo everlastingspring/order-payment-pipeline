@@ -92,8 +92,12 @@ resilience4j:
         permitted-number-of-calls-in-half-open-state: 3
         sliding-window-type: COUNT_BASED
 
+outbox:
+  processor:
+    poll-interval-ms: 5000
+
 logging:
   level:
     com.paymentplatform: DEBUG
     org.springframework.kafka: INFO
-    org.hibernate.SQL: DEBUG
+    org.hibernate.SQL: WARN

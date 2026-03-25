@@ -4,6 +4,7 @@ import com.paymentplatform.inventoryservice.domain.entity.ReservationRecord;
 import com.paymentplatform.inventoryservice.domain.entity.ReservationStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -16,5 +17,5 @@ public interface ReservationRecordRepository extends JpaRepository<ReservationRe
     List<ReservationRecord> findByOrderIdAndStatus(String orderId, ReservationStatus status);
 
     @Query("SELECT r FROM ReservationRecord r WHERE r.status = :status AND r.reservedAt < :cutoff")
-    List<ReservationRecord> findExpiredReservations(ReservationStatus status, Instant cutoff);
+    List<ReservationRecord> findExpiredReservations(@Param("status") ReservationStatus status, @Param("cutoff") Instant cutoff);
 }

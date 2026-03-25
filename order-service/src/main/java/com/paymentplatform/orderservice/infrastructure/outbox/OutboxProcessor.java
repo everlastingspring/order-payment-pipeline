@@ -32,19 +32,25 @@ public class OutboxProcessor {
      * Circuit breaker: stops polling Kafka when it's consistently failing,
      * preventing the 500ms scheduler from hammering a dead broker.
      */
-    @Scheduled(fixedDelay = 500)
+    @Scheduled(fixedDelayString = "${outbox.processor.poll-interval-ms:5000}")
     @Transactional
     @CircuitBreaker(name = "kafkaPublisher", fallbackMethod = "processOutboxFallback")
     public void processOutbox() {
         List<OutboxEvent> events = outboxEventRepository
                 .findTop50ByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING);
 
+        if (events.isEmpty()) {
+            return;
+        }
+
+        int published = 0;
         for (OutboxEvent event : events) {
             try {
                 kafkaEventPublisher.publish(event.getTopic(), event.getAggregateId(), event.getPayload())
                         .get(); // block to ensure delivery before marking published
                 event.markPublished();
                 outboxEventRepository.save(event);
+                published++;
             } catch (Exception e) {
                 log.error("Failed to publish outbox event: id={}, topic={}, attempt={}",
                         event.getId(), event.getTopic(), event.getRetryCount() + 1, e);
@@ -57,6 +63,10 @@ public class OutboxProcessor {
                 }
                 outboxEventRepository.save(event);
             }
+        }
+
+        if (published > 0) {
+            log.info("Outbox: published {}/{} events", published, events.size());
         }
     }
 

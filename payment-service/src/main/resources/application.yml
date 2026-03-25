@@ -116,8 +116,12 @@ resilience4j:
       paymentGateway:
         timeout-duration: 5s
 
+outbox:
+  processor:
+    poll-interval-ms: 5000
+
 logging:
   level:
     com.paymentplatform: DEBUG
     org.springframework.kafka: INFO
-    org.hibernate.SQL: DEBUG
+    org.hibernate.SQL: WARN

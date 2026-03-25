@@ -24,13 +24,18 @@ public class OutboxProcessor {
 
     private static final int MAX_RETRIES = 5;
 
-    @Scheduled(fixedDelay = 500)
+    @Scheduled(fixedDelayString = "${outbox.processor.poll-interval-ms:5000}")
     @Transactional
     @CircuitBreaker(name = "kafkaPublisher", fallbackMethod = "processOutboxFallback")
     public void processOutbox() {
         List<OutboxEvent> pendingEvents =
                 outboxEventRepository.findTop50ByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING);
 
+        if (pendingEvents.isEmpty()) {
+            return;
+        }
+
+        int published = 0;
         for (OutboxEvent event : pendingEvents) {
             try {
                 kafkaEventPublisher.publish(event.getTopic(), event.getAggregateId(), event.getPayload())
@@ -38,7 +43,7 @@ public class OutboxProcessor {
 
                 event.markPublished();
                 outboxEventRepository.save(event);
-                log.debug("Outbox event published: id={}, topic={}", event.getId(), event.getTopic());
+                published++;
 
             } catch (Exception e) {
                 log.error("Failed to publish outbox event: id={}, topic={}, attempt={}/{}",
@@ -52,6 +57,10 @@ public class OutboxProcessor {
                 }
                 outboxEventRepository.save(event);
             }
+        }
+
+        if (published > 0) {
+            log.info("Outbox: published {}/{} events", published, pendingEvents.size());
         }
     }
 

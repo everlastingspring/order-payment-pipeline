@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentplatform.commonlib.constants.KafkaTopics;
 import com.paymentplatform.commonlib.dto.InventoryDto;
 import com.paymentplatform.commonlib.dto.OrderItemDto;
+import com.paymentplatform.commonlib.dto.RestockRequest;
 import com.paymentplatform.commonlib.events.InventoryFailedEvent;
 import com.paymentplatform.commonlib.events.InventoryReservedEvent;
 import com.paymentplatform.commonlib.events.OrderCancelledEvent;
@@ -166,6 +167,40 @@ public class InventoryService {
     @Transactional(readOnly = true)
     public List<InventoryDto> getAllInventory() {
         return inventoryRepository.findAllWithProduct().stream()
+                .map(inventoryMapper::toDto)
+                .toList();
+    }
+
+    // ── Admin operations ──
+
+    /**
+     * Adds stock to a product's inventory (admin restock).
+     * Automatically moves status from OUT_OF_STOCK/DEPLETED back to AVAILABLE.
+     */
+    @Transactional
+    public InventoryDto restockInventory(UUID productId, RestockRequest request) {
+        Inventory inventory = inventoryRepository.findByProductIdWithProduct(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Inventory", productId));
+
+        int before = inventory.getAvailableQuantity();
+        inventory.restock(request.getQuantity());
+        inventoryRepository.save(inventory);
+
+        log.info("Inventory restocked: productId={}, sku={}, before={}, added={}, after={}, reason={}",
+                productId, inventory.getProduct().getSku(),
+                before, request.getQuantity(), inventory.getAvailableQuantity(),
+                request.getReason());
+
+        return inventoryMapper.toDto(inventory);
+    }
+
+    /**
+     * Returns products with availableQuantity at or below the given threshold.
+     * Default threshold = 10 if not specified.
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryDto> getLowStockInventory(int threshold) {
+        return inventoryRepository.findLowStock(threshold).stream()
                 .map(inventoryMapper::toDto)
                 .toList();
     }

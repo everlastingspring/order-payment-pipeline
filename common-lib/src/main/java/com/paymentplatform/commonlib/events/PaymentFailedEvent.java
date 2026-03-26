@@ -21,6 +21,7 @@ public class PaymentFailedEvent extends BaseEvent {
     private String paymentId;
     private String orderId;
     private String customerId;
+    private String customerEmail;
     private MoneyDto attemptedAmount;
     private PaymentMethod paymentMethod;
     private String failureReason;

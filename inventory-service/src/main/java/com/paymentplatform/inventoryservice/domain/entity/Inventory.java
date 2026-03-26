@@ -74,6 +74,15 @@ public class Inventory {
     }
 
     /**
+     * Adds stock to available quantity (admin restock operation).
+     * Always safe to call — no preconditions.
+     */
+    public void restock(int quantity) {
+        this.availableQuantity += quantity;
+        updateStatus();
+    }
+
+    /**
      * Releases previously reserved quantity back to available stock.
      * Used for saga compensation when an order is cancelled.
      */

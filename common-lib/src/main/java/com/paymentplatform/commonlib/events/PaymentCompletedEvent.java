@@ -21,6 +21,7 @@ public class PaymentCompletedEvent extends BaseEvent {
     private String paymentId;
     private String orderId;
     private String customerId;
+    private String customerEmail;
     private MoneyDto amount;
     private PaymentMethod paymentMethod;
     private String transactionReference;

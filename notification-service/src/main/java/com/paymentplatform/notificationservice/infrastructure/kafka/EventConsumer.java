@@ -38,7 +38,7 @@ public class EventConsumer {
                     NotificationType.ORDER_CONFIRMATION,
                     "Order Received — #" + event.getOrderId().substring(0, 8),
                     buildOrderCreatedBody(event),
-                    event.getOrderId(),
+                    buildReferenceId(KafkaTopics.ORDER_CREATED, event.getOrderId()),
                     KafkaTopics.ORDER_CREATED,
                     event.getEventId() != null ? event.getEventId().toString() : null
             );
@@ -60,11 +60,11 @@ public class EventConsumer {
             log.info("Received payment.completed: orderId={}, paymentId={}", event.getOrderId(), event.getPaymentId());
             notificationService.sendNotification(
                     event.getCustomerId(),
-                    null, // will be resolved from order context if needed
+                    event.getCustomerEmail(),
                     NotificationType.PAYMENT_SUCCESS,
                     "Payment Successful — Order #" + event.getOrderId().substring(0, 8),
                     buildPaymentCompletedBody(event),
-                    event.getOrderId(),
+                    buildReferenceId(KafkaTopics.PAYMENT_COMPLETED, event.getOrderId()),
                     KafkaTopics.PAYMENT_COMPLETED,
                     event.getEventId() != null ? event.getEventId().toString() : null
             );
@@ -86,11 +86,11 @@ public class EventConsumer {
             log.info("Received payment.failed: orderId={}", event.getOrderId());
             notificationService.sendNotification(
                     event.getCustomerId(),
-                    null,
+                    event.getCustomerEmail(),
                     NotificationType.PAYMENT_FAILURE,
                     "Payment Failed — Order #" + event.getOrderId().substring(0, 8),
                     buildPaymentFailedBody(event),
-                    event.getOrderId(),
+                    buildReferenceId(KafkaTopics.PAYMENT_FAILED, event.getOrderId()),
                     KafkaTopics.PAYMENT_FAILED,
                     event.getEventId() != null ? event.getEventId().toString() : null
             );
@@ -116,7 +116,7 @@ public class EventConsumer {
                     NotificationType.ORDER_CONFIRMATION,
                     "Order Confirmed — #" + event.getOrderId().substring(0, 8),
                     buildOrderCompletedBody(event),
-                    event.getOrderId(),
+                    buildReferenceId(KafkaTopics.ORDER_COMPLETED, event.getOrderId()),
                     KafkaTopics.ORDER_COMPLETED,
                     event.getEventId() != null ? event.getEventId().toString() : null
             );
@@ -142,7 +142,7 @@ public class EventConsumer {
                     NotificationType.ORDER_CANCELLED,
                     "Order Cancelled — #" + event.getOrderId().substring(0, 8),
                     buildOrderCancelledBody(event),
-                    event.getOrderId(),
+                    buildReferenceId(KafkaTopics.ORDER_CANCELLED, event.getOrderId()),
                     KafkaTopics.ORDER_CANCELLED,
                     event.getEventId() != null ? event.getEventId().toString() : null
             );
@@ -168,7 +168,7 @@ public class EventConsumer {
                     NotificationType.ORDER_FAILED,
                     "Order Failed — #" + event.getOrderId().substring(0, 8),
                     buildOrderFailedBody(event),
-                    event.getOrderId(),
+                    buildReferenceId(KafkaTopics.ORDER_FAILED, event.getOrderId()),
                     KafkaTopics.ORDER_FAILED,
                     event.getEventId() != null ? event.getEventId().toString() : null
             );
@@ -212,5 +212,9 @@ public class EventConsumer {
         return String.format("We're sorry, your order #%s could not be completed. Reason: %s. "
                         + "No payment has been charged.",
                 e.getOrderId().substring(0, 8), e.getFailureReason());
+    }
+
+    private String buildReferenceId(String topic, String orderId) {
+        return topic + ":" + orderId;
     }
 }

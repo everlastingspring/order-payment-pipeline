@@ -112,19 +112,28 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
 
-        if (order.getStatus() == OrderStatus.CONFIRMED
-                || order.getStatus() == OrderStatus.COMPLETED
-                || order.getStatus() == OrderStatus.CANCELLED
+        // CANCELLED and FAILED are terminal — nothing left to cancel.
+        // PENDING, INVENTORY_RESERVED, CONFIRMED are all cancellable:
+        //   - PENDING / INVENTORY_RESERVED: no payment taken yet → no wallet refund
+        //   - CONFIRMED: payment already debited → wallet-service will issue a full refund
+        if (order.getStatus() == OrderStatus.CANCELLED
                 || order.getStatus() == OrderStatus.FAILED) {
             throw new InvalidOrderStateException(
                     orderId.toString(), order.getStatus(), OrderStatus.CANCELLED);
         }
 
+        // Capture the current status BEFORE mutation — used as previousStatus in the event
+        OrderStatus previousStatus = order.getStatus();
+        boolean willRefund = order.isPaymentCompleted();
+
         order.setStatus(OrderStatus.CANCELLED);
         order.setSagaStatus(SagaStatus.COMPENSATING);
         Order saved = orderRepository.save(order);
 
-        publishOrderCancelled(saved, reason, "CUSTOMER");
+        publishOrderCancelled(saved, reason, "CUSTOMER", previousStatus);
+
+        log.info("Order cancelled: orderId={}, previousStatus={}, willRefund={}",
+                orderId, previousStatus, willRefund);
 
         return orderMapper.toDto(saved);
     }
@@ -147,14 +156,21 @@ public class OrderService {
         }
     }
 
-    public void publishOrderCancelled(Order order, String reason, String cancelledBy) {
+    /**
+     * Publishes order.cancelled to the outbox.
+     *
+     * @param previousStatus the order status BEFORE it was set to CANCELLED — caller must capture
+     *                       this before mutating order.status, otherwise it always reads CANCELLED.
+     */
+    public void publishOrderCancelled(Order order, String reason, String cancelledBy,
+                                      OrderStatus previousStatus) {
         var event = com.paymentplatform.commonlib.events.OrderCancelledEvent.builder()
                 .orderId(order.getId().toString())
                 .customerId(order.getCustomerId())
                 .customerEmail(order.getCustomerEmail())
                 .cancellationReason(reason)
                 .cancelledBy(cancelledBy)
-                .previousStatus(order.getStatus())
+                .previousStatus(previousStatus)
                 .refundAmount(order.isPaymentCompleted()
                         ? MoneyDto.builder().amount(order.getTotalAmount()).currency(order.getCurrency()).build()
                         : MoneyDto.builder().amount(BigDecimal.ZERO).currency(order.getCurrency()).build())

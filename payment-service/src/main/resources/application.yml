@@ -120,6 +120,12 @@ outbox:
   processor:
     poll-interval-ms: 5000
 
+# Internal service URLs (local dev)
+# In EKS: override with ClusterIP service DNS (e.g. http://wallet-service:8085)
+services:
+  wallet:
+    base-url: http://localhost:8085
+
 logging:
   level:
     com.paymentplatform: DEBUG

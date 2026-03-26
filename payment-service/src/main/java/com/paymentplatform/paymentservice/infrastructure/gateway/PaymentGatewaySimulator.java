@@ -30,6 +30,7 @@ public class PaymentGatewaySimulator {
     @CircuitBreaker(name = "paymentGateway", fallbackMethod = "chargeFallback")
     @Retry(name = "paymentGateway")
     public GatewayResponse charge(String orderId, BigDecimal amount, String currency, PaymentMethod method) {
+        // method param kept for future routing (e.g. different gateway per method)
         log.info("Gateway charging: orderId={}, amount={} {}, method={}", orderId, amount, currency, method);
 
         // Simulate processing delay (50-200ms)
@@ -56,21 +57,5 @@ public class PaymentGatewaySimulator {
         return GatewayResponse.failure("GATEWAY_UNAVAILABLE", "Payment gateway is temporarily unavailable");
     }
 
-    /**
-     * Immutable result from the payment gateway.
-     */
-    public record GatewayResponse(
-            boolean successful,
-            String transactionReference,
-            String failureCode,
-            String failureReason
-    ) {
-        public static GatewayResponse success(String transactionReference) {
-            return new GatewayResponse(true, transactionReference, null, null);
-        }
-
-        public static GatewayResponse failure(String failureCode, String failureReason) {
-            return new GatewayResponse(false, null, failureCode, failureReason);
-        }
-    }
 }
+

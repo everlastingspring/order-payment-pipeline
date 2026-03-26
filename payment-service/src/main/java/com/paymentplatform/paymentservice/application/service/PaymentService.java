@@ -18,12 +18,13 @@ import com.paymentplatform.paymentservice.domain.entity.Payment;
 import com.paymentplatform.paymentservice.domain.repository.IdempotencyKeyRepository;
 import com.paymentplatform.paymentservice.domain.repository.OutboxEventRepository;
 import com.paymentplatform.paymentservice.domain.repository.PaymentRepository;
-import com.paymentplatform.paymentservice.infrastructure.gateway.PaymentGatewaySimulator;
-import com.paymentplatform.paymentservice.infrastructure.gateway.PaymentGatewaySimulator.GatewayResponse;
+import com.paymentplatform.paymentservice.application.processor.PaymentProcessor;
+import com.paymentplatform.paymentservice.infrastructure.gateway.GatewayResponse;
 import com.paymentplatform.paymentservice.infrastructure.lock.RedisLockService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -58,9 +60,16 @@ public class PaymentService {
     private final IdempotencyKeyRepository idempotencyKeyRepository;
     private final OutboxEventRepository outboxEventRepository;
     private final RedisLockService redisLockService;
-    private final PaymentGatewaySimulator gateway;
     private final PaymentMapper paymentMapper;
     private final ObjectMapper objectMapper;
+
+    /**
+     * All PaymentProcessor beans injected by Spring.
+     * To add UPI/CARD: create a new @Component implementing PaymentProcessor.
+     * No changes needed here.
+     */
+    @Autowired
+    private List<PaymentProcessor> processors;
 
     @Value("${payment.idempotency.ttl-seconds:86400}")
     private long idempotencyTtlSeconds;
@@ -125,33 +134,41 @@ public class PaymentService {
                 .idempotencyKey(idempotencyKeyValue)
                 .build();
 
-        payment = paymentRepository.save(payment);
-        log.info("Payment initiated: paymentId={}, orderId={}", payment.getId(), orderId);
+        // savedPayment is a new effectively-final reference — required for lambda capture below
+        final Payment savedPayment = paymentRepository.save(payment);
+        log.info("Payment initiated: paymentId={}, orderId={}, method={}",
+                savedPayment.getId(), orderId, savedPayment.getPaymentMethod());
 
-        // Call the payment gateway
-        GatewayResponse response = gateway.charge(
+        // Route to correct processor (WALLET → WalletPaymentProcessor, future UPI/CARD → GatewayPaymentProcessor)
+        PaymentProcessor processor = processors.stream()
+                .filter(p -> p.supports(savedPayment.getPaymentMethod()))
+                .findFirst()
+                .orElseThrow(() -> new UnsupportedOperationException(
+                        "No payment processor found for method: " + savedPayment.getPaymentMethod()));
+
+        GatewayResponse response = processor.charge(
                 orderId,
-                payment.getAmount(),
-                payment.getCurrency(),
-                payment.getPaymentMethod()
+                savedPayment.getCustomerId(),
+                savedPayment.getAmount(),
+                savedPayment.getCurrency()
         );
 
         if (response.successful()) {
-            payment.markCompleted(response.transactionReference());
-            paymentRepository.save(payment);
+            savedPayment.markCompleted(response.transactionReference());
+            paymentRepository.save(savedPayment);
 
-            publishPaymentCompleted(payment);
-            log.info("Payment completed: paymentId={}, txnRef={}", payment.getId(), response.transactionReference());
+            publishPaymentCompleted(savedPayment, event.getCustomerEmail());
+            log.info("Payment completed: paymentId={}, txnRef={}", savedPayment.getId(), response.transactionReference());
         } else {
-            payment.markFailed(response.failureReason(), response.failureCode());
-            paymentRepository.save(payment);
+            savedPayment.markFailed(response.failureReason(), response.failureCode());
+            paymentRepository.save(savedPayment);
 
-            publishPaymentFailed(payment);
-            log.warn("Payment failed: paymentId={}, reason={}", payment.getId(), response.failureReason());
+            publishPaymentFailed(savedPayment, event.getCustomerEmail());
+            log.warn("Payment failed: paymentId={}, reason={}", savedPayment.getId(), response.failureReason());
         }
 
         // Cache the result for idempotency
-        saveIdempotencyKey(idempotencyKeyValue, payment);
+        saveIdempotencyKey(idempotencyKeyValue, savedPayment);
     }
 
     // ── Read operations ──
@@ -178,11 +195,12 @@ public class PaymentService {
 
     // ── Outbox event helpers ──
 
-    private void publishPaymentCompleted(Payment payment) {
+    private void publishPaymentCompleted(Payment payment, String customerEmail) {
         PaymentCompletedEvent event = PaymentCompletedEvent.builder()
                 .paymentId(payment.getId().toString())
                 .orderId(payment.getOrderId())
                 .customerId(payment.getCustomerId())
+                .customerEmail(customerEmail)
                 .amount(MoneyDto.builder()
                         .amount(payment.getAmount())
                         .currency(payment.getCurrency())
@@ -195,11 +213,12 @@ public class PaymentService {
         saveOutboxEvent(payment.getId().toString(), KafkaTopics.PAYMENT_COMPLETED, event);
     }
 
-    private void publishPaymentFailed(Payment payment) {
+    private void publishPaymentFailed(Payment payment, String customerEmail) {
         PaymentFailedEvent event = PaymentFailedEvent.builder()
                 .paymentId(payment.getId().toString())
                 .orderId(payment.getOrderId())
                 .customerId(payment.getCustomerId())
+                .customerEmail(customerEmail)
                 .attemptedAmount(MoneyDto.builder()
                         .amount(payment.getAmount())
                         .currency(payment.getCurrency())

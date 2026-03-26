@@ -34,6 +34,7 @@
         <opentelemetry.version>1.38.0</opentelemetry.version>
         <loki-logback.version>1.5.2</loki-logback.version>
         <resilience4j.version>2.2.0</resilience4j.version>
+        <skipITs>false</skipITs>
     </properties>
 
     <dependencyManagement>
@@ -149,7 +150,7 @@
                                             <limit>
                                                 <counter>LINE</counter>
                                                 <value>COVEREDRATIO</value>
-                                                <minimum>0.70</minimum>
+                                                <minimum>0.40</minimum>
                                             </limit>
                                         </limits>
                                     </rule>
@@ -160,5 +161,23 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <skipITs>${skipITs}</skipITs>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 </project>

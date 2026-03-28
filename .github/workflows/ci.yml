@@ -1,4 +1,4 @@
-name: CI / CD Pipeline
+name: CI Workflow
 
 on:
   push:
@@ -11,7 +11,7 @@ env:
   AWS_REGION: ap-south-1
   JAVA_VERSION: '21'
 
-# ── S22 ── BUILD + TEST ───────────────────────────────────────────────────────
+# ── BUILD + TEST ───────────────────────────────────────────────────────
 jobs:
   build:
     name: Build & Test (unit + IT)
@@ -40,7 +40,7 @@ jobs:
             **/target/failsafe-reports/
           retention-days: 7
 
-# ── S23a ── COVERAGE + SONARCLOUD ────────────────────────────────────────────
+# ── COVERAGE + SONARCLOUD ────────────────────────────────────────────
   quality:
     name: Coverage Gate + SonarCloud
     runs-on: ubuntu-latest
@@ -72,7 +72,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-# ── S23b ── OWASP SECURITY SCAN ──────────────────────────────────────────────
+# ── OWASP SECURITY SCAN ──────────────────────────────────────────────
   security:
     name: OWASP Dependency-Check
     runs-on: ubuntu-latest
@@ -120,7 +120,7 @@ jobs:
           path: target/dependency-check-report.html
           retention-days: 14
 
-# ── S24 ── DOCKER BUILD + TRIVY + ECR PUSH ───────────────────────────────────
+# ── DOCKER BUILD + TRIVY + ECR PUSH ───────────────────────────────────
   docker:
     name: Docker → ECR (${{ matrix.service }})
     runs-on: ubuntu-latest

@@ -24,6 +24,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -178,13 +179,35 @@ class WalletServiceIT {
                 .orderId("order-concurrent-002")
                 .build();
 
-        Thread thread1 = new Thread(() -> walletService.debitForPayment(request1));
-        Thread thread2 = new Thread(() -> walletService.debitForPayment(request2));
+        // Capture exceptions inside lambdas so they don't reach Java's uncaught-exception
+        // handler, which would print "Exception in thread..." to stderr and produce a
+        // spurious GitHub Actions error annotation even when the test passes.
+        AtomicReference<Throwable> error1 = new AtomicReference<>();
+        AtomicReference<Throwable> error2 = new AtomicReference<>();
+
+        Thread thread1 = new Thread(() -> {
+            try {
+                walletService.debitForPayment(request1);
+            } catch (Exception e) {
+                error1.set(e);
+            }
+        });
+        Thread thread2 = new Thread(() -> {
+            try {
+                walletService.debitForPayment(request2);
+            } catch (Exception e) {
+                error2.set(e);
+            }
+        });
 
         thread1.start();
         thread2.start();
         thread1.join();
         thread2.join();
+
+        // Both debits target different wallets — neither should fail
+        assertThat(error1.get()).isNull();
+        assertThat(error2.get()).isNull();
 
         // Verify both wallets have correct balances
         Wallet wallet1 = walletRepository.findByCustomerId(customer1).orElseThrow();

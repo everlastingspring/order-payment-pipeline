@@ -48,8 +48,9 @@
             ${project.basedir}/../**/target/site/jacoco/jacoco.xml,
             ${project.basedir}/target/site/jacoco/jacoco.xml
         </sonar.coverage.jacoco.xmlReportPaths>
-        <!-- OWASP Dependency-Check -->
-        <dependency-check.version>10.0.4</dependency-check.version>
+        <!-- OWASP Dependency-Check
+             12.1.0 fixes NVD CVSS v4 "SAFETY" enum parse crash (CvssV4Data$ModifiedCiaType) -->
+        <dependency-check.version>12.1.0</dependency-check.version>
     </properties>
 
     <dependencyManagement>

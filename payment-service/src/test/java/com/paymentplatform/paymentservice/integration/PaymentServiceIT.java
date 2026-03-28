@@ -192,13 +192,39 @@ class PaymentServiceIT {
         String orderId = "order-it-concurrent-001";
         InventoryReservedEvent event = inventoryReservedEvent(orderId);
 
-        Thread thread1 = new Thread(() -> paymentService.processPayment(event));
-        Thread thread2 = new Thread(() -> paymentService.processPayment(event));
+        // Count threads that were correctly rejected by the Redis distributed lock.
+        // Using AtomicInteger so each thread lambda can write the result safely.
+        // We catch RuntimeException here instead of letting it propagate to the raw
+        // Thread's uncaught-exception handler, which would print "Exception in thread..."
+        // to stderr and generate a spurious GitHub Actions error annotation.
+        AtomicInteger lockRejections = new AtomicInteger(0);
+
+        Thread thread1 = new Thread(() -> {
+            try {
+                paymentService.processPayment(event);
+            } catch (RuntimeException e) {
+                if (e.getMessage() != null && e.getMessage().contains("Could not acquire lock")) {
+                    lockRejections.incrementAndGet();
+                }
+            }
+        });
+        Thread thread2 = new Thread(() -> {
+            try {
+                paymentService.processPayment(event);
+            } catch (RuntimeException e) {
+                if (e.getMessage() != null && e.getMessage().contains("Could not acquire lock")) {
+                    lockRejections.incrementAndGet();
+                }
+            }
+        });
 
         thread1.start();
         thread2.start();
         thread1.join();
         thread2.join();
+
+        // Exactly one thread should have been rejected — the one that lost the lock race
+        assertThat(lockRejections.get()).isEqualTo(1);
 
         List<Payment> paymentsForOrder = paymentRepository.findAll().stream()
                 .filter(payment -> orderId.equals(payment.getOrderId()))

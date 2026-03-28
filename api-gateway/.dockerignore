@@ -1,4 +1,5 @@
-target/
+# target/ is intentionally NOT ignored — CI pre-builds the JAR and Docker copies it in.
+# Dockerfiles are CI-friendly: no build stage, just COPY target/*.jar app.jar.
 .git/
 .gitignore
 *.md

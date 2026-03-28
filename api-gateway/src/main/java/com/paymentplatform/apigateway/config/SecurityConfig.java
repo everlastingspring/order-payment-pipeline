@@ -44,7 +44,6 @@ public class SecurityConfig {
     public SecurityWebFilterChain prodSecurityFilterChain(ServerHttpSecurity http,
                                                           ObjectMapper objectMapper) {
         return http
-                .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchanges -> exchanges
                         .pathMatchers("/actuator/**").permitAll()
                         .anyExchange().authenticated()

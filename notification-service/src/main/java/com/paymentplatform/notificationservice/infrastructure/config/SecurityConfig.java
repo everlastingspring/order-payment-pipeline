@@ -41,7 +41,6 @@ public class SecurityConfig {
     public SecurityFilterChain prodSecurityFilterChain(HttpSecurity http,
                                                        ObjectMapper objectMapper) throws Exception {
         return http
-                .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/**").permitAll()

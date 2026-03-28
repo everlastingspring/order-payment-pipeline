@@ -66,7 +66,8 @@ jobs:
           restore-keys: ${{ runner.os }}-sonar
 
       - name: JaCoCo check + SonarCloud analysis
-        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -DskipITs=true
+        # sonar:sonar resolves to the version pinned in pluginManagement (avoids "unspecified version" warning)
+        run: mvn -B verify sonar:sonar -DskipITs=true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -103,9 +104,11 @@ jobs:
       - name: Run OWASP Dependency-Check
         # cache-hit → skip NVD update, data already fresh this week
         # cache-miss → pull latest CVEs from NVD (once per week)
+        # enableMemorySegments=false → silences Lucene vector incubator warning on Java 21
         run: |
           mvn dependency-check:aggregate --batch-mode -DskipTests \
             -DnvdApiKey=${{ secrets.NVD_API_KEY }} \
+            -Dorg.apache.lucene.store.MMapDirectory.enableMemorySegments=false \
             ${{ steps.nvd-cache.outputs.cache-hit == 'true' && '-DautoUpdate=false' || '' }}
         continue-on-error: true
 

@@ -43,11 +43,15 @@
         <sonar.projectKey>everlastingspring_order-payment-pipeline</sonar.projectKey>
         <sonar.organization>everlastingspring</sonar.organization>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
-        <!-- Tell Sonar where to find JaCoCo XML reports across all modules -->
+        <!-- ${project.basedir} is evaluated per-module by Maven reactor, so each module
+             points to its own target/. The ../** pattern caused Sonar to look outside the
+             project root and produce "File not found in project sources" warnings. -->
         <sonar.coverage.jacoco.xmlReportPaths>
-            ${project.basedir}/../**/target/site/jacoco/jacoco.xml,
             ${project.basedir}/target/site/jacoco/jacoco.xml
         </sonar.coverage.jacoco.xmlReportPaths>
+        <!-- Without this, Sonar reports "sonar.java.binaries are empty" and cannot
+             correlate .class files with source lines for coverage mapping. -->
+        <sonar.java.binaries>${project.basedir}/target/classes</sonar.java.binaries>
         <!-- OWASP Dependency-Check
              12.2.0 fixes SAFETY enum parse crash + CveEcosystemMapper NPE on CVE-2026-2484 -->
         <dependency-check.version>12.2.0</dependency-check.version>
@@ -158,17 +162,25 @@
                     <artifactId>dependency-check-maven</artifactId>
                     <version>${dependency-check.version}</version>
                     <configuration>
-                        <!-- Fail build on CVSS score >= 7 (HIGH/CRITICAL) -->
                         <failBuildOnCVSS>7</failBuildOnCVSS>
                         <suppressionFile>${maven.multiModuleProjectDirectory}/.owasp-suppressions.xml</suppressionFile>
                         <formats>
                             <format>HTML</format>
                             <format>JSON</format>
                         </formats>
-                        <!-- Explicit data directory so GitHub Actions cache path is predictable.
-                             Without this the plugin uses an internal default that may vary by version. -->
+                        <!-- Fixed path so the GitHub Actions cache target is predictable -->
                         <dataDirectory>${user.home}/.owasp-dependency-check</dataDirectory>
+                        <!-- OSS Index requires a Sonatype account; disabled to avoid credential warning.
+                             NVD (configured via nvdApiKey in ci.yml) is sufficient for our needs. -->
+                        <ossIndexAnalyzerEnabled>false</ossIndexAnalyzerEnabled>
                     </configuration>
+                </plugin>
+                <!-- Pinned so ci.yml can use the short form "sonar:sonar" without the
+                     "Using an unspecified version" warning. -->
+                <plugin>
+                    <groupId>org.sonarsource.scanner.maven</groupId>
+                    <artifactId>sonar-maven-plugin</artifactId>
+                    <version>4.0.0.4121</version>
                 </plugin>
                 <plugin>
                     <groupId>org.jacoco</groupId>

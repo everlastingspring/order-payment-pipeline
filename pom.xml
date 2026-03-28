@@ -39,6 +39,17 @@
              that don't have JaCoCo (e.g. common-lib). JaCoCo's prepare-agent overwrites
              this on modules where it is configured, appending its -javaagent flag. -->
         <argLine/>
+        <!-- SonarCloud — values picked up automatically by mvn sonar:sonar -->
+        <sonar.projectKey>everlastingspring_order-payment-pipeline</sonar.projectKey>
+        <sonar.organization>everlastingspring</sonar.organization>
+        <sonar.host.url>https://sonarcloud.io</sonar.host.url>
+        <!-- Tell Sonar where to find JaCoCo XML reports across all modules -->
+        <sonar.coverage.jacoco.xmlReportPaths>
+            ${project.basedir}/../**/target/site/jacoco/jacoco.xml,
+            ${project.basedir}/target/site/jacoco/jacoco.xml
+        </sonar.coverage.jacoco.xmlReportPaths>
+        <!-- OWASP Dependency-Check -->
+        <dependency-check.version>10.0.4</dependency-check.version>
     </properties>
 
     <dependencyManagement>
@@ -139,6 +150,20 @@
                           Appending EnableDynamicAgentLoading silences the ByteBuddy/Mockito JVM 21 warning.
                         -->
                         <argLine>@{argLine} -XX:+EnableDynamicAgentLoading</argLine>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.owasp</groupId>
+                    <artifactId>dependency-check-maven</artifactId>
+                    <version>${dependency-check.version}</version>
+                    <configuration>
+                        <!-- Fail build on CVSS score >= 7 (HIGH/CRITICAL) -->
+                        <failBuildOnCVSS>7</failBuildOnCVSS>
+                        <suppressionFile>${maven.multiModuleProjectDirectory}/.owasp-suppressions.xml</suppressionFile>
+                        <formats>
+                            <format>HTML</format>
+                            <format>JSON</format>
+                        </formats>
                     </configuration>
                 </plugin>
                 <plugin>

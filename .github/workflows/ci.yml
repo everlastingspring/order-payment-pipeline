@@ -1,0 +1,255 @@
+name: CI / CD Pipeline
+
+# ── Triggers ─────────────────────────────────────────────────────────────────
+# Every push on every branch runs Build + Quality + Security.
+# Docker build + ECR push only runs on main or version tags (v*.*.*).
+on:
+  push:
+    branches: ['**']
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [master]
+
+env:
+  AWS_REGION: ap-south-1
+  JAVA_VERSION: '21'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# S22 — BUILD + TEST
+# Runs mvn clean install which executes: compile → unit tests (Surefire) →
+# integration tests (Failsafe + Testcontainers) → JaCoCo report.
+# Docker is available on ubuntu-latest so Testcontainers works without any setup.
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  build:
+    name: Build & Test (unit + IT)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Build and run all tests
+        run: mvn clean install --batch-mode
+
+      - name: Upload Surefire + Failsafe reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
+          retention-days: 7
+
+# ─────────────────────────────────────────────────────────────────────────────
+# S23a — COVERAGE GATE + SONARCLOUD
+# Runs unit tests only (ITs already verified in build job) + enforces JaCoCo
+# 40% line coverage gate. Fails the pipeline if coverage drops below threshold.
+# Sends results to SonarCloud for code smell and duplication analysis.
+# ─────────────────────────────────────────────────────────────────────────────
+  quality:
+    name: Coverage Gate + SonarCloud
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # SonarCloud needs full git history for blame annotations and new-code detection
+          fetch-depth: 0
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Run JaCoCo check + SonarCloud analysis
+        # verify phase: runs unit tests → JaCoCo report → JaCoCo check (fails if < 40%)
+        # sonar-maven-plugin:sonar: uploads coverage XML + bytecode to SonarCloud
+        # Full plugin coordinates used (SonarCloud recommendation) — avoids version ambiguity
+        # -DskipITs=true: ITs already ran in the build job; skip them here for speed
+        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -DskipITs=true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# S23b — SECURITY SCANNING
+# OWASP Dependency-Check: scans all Maven dependencies against the NVD CVE
+# database. Fails if any dependency has a CVSS score >= 7 (HIGH/CRITICAL).
+# Report uploaded as artifact for review even when build passes.
+# ─────────────────────────────────────────────────────────────────────────────
+  security:
+    name: OWASP Dependency-Check
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Cache NVD database
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: owasp-nvd-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: owasp-nvd-${{ runner.os }}-
+
+      - name: Run OWASP Dependency-Check
+        # aggregate: single report covering all modules
+        # continue-on-error: warn on first run while suppression list is being built up;
+        # tighten to false once the project has a stable suppression baseline
+        run: mvn dependency-check:aggregate --batch-mode -DskipTests
+        continue-on-error: true
+
+      - name: Upload OWASP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-report
+          path: target/dependency-check-report.html
+          retention-days: 14
+
+# ─────────────────────────────────────────────────────────────────────────────
+# S24 — DOCKER BUILD + TRIVY SCAN + ECR PUSH
+# Runs only on push to main or version tags (not on PRs or feature branches).
+# Matrix strategy builds all 6 services in parallel.
+# Each service: build JAR → build image → Trivy scan → push to ECR.
+# Tags applied: <git-sha-short>, <branch-or-tag-name>, latest
+#
+# Required GitHub Secrets:
+#   AWS_ACCESS_KEY_ID      — IAM user with ecr:GetAuthorizationToken +
+#                            ecr:BatchCheckLayerAvailability +
+#                            ecr:PutImage + ecr:InitiateLayerUpload +
+#                            ecr:UploadLayerPart + ecr:CompleteLayerUpload
+#   AWS_SECRET_ACCESS_KEY  — IAM user secret
+#   AWS_ACCOUNT_ID         — 12-digit AWS account ID (used for ECR registry URL)
+#
+# ECR repositories must be created before the first push:
+#   aws ecr create-repository --repository-name order-payment-platform/api-gateway       --region ap-south-1
+#   aws ecr create-repository --repository-name order-payment-platform/order-service      --region ap-south-1
+#   aws ecr create-repository --repository-name order-payment-platform/payment-service    --region ap-south-1
+#   aws ecr create-repository --repository-name order-payment-platform/inventory-service  --region ap-south-1
+#   aws ecr create-repository --repository-name order-payment-platform/notification-service --region ap-south-1
+#   aws ecr create-repository --repository-name order-payment-platform/wallet-service     --region ap-south-1
+# ─────────────────────────────────────────────────────────────────────────────
+  docker:
+    name: Docker → ECR (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [quality, security]
+    if: |
+      github.ref == 'refs/heads/master' ||
+      startsWith(github.ref, 'refs/tags/v')
+
+    strategy:
+      fail-fast: false   # if one service fails, let others continue
+      matrix:
+        include:
+          - service: api-gateway
+            port: 8080
+          - service: order-service
+            port: 8081
+          - service: payment-service
+            port: 8082
+          - service: inventory-service
+            port: 8083
+          - service: notification-service
+            port: 8084
+          - service: wallet-service
+            port: 8085
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Build JAR (tests already passed in build job)
+        # -pl <service> -am: build this module + all modules it depends on (common-lib)
+        run: mvn package -DskipTests --batch-mode -pl ${{ matrix.service }} -am
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          SHA_SHORT=${GITHUB_SHA::7}
+          # Replace / with - in branch names (e.g. feature/foo → feature-foo)
+          REF_SLUG=${GITHUB_REF_NAME//\//-}
+          REGISTRY=${{ steps.ecr-login.outputs.registry }}
+          REPO=$REGISTRY/order-payment-platform/${{ matrix.service }}
+          echo "sha=$REPO:$SHA_SHORT"    >> $GITHUB_OUTPUT
+          echo "ref=$REPO:$REF_SLUG"     >> $GITHUB_OUTPUT
+          echo "latest=$REPO:latest"     >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ steps.tags.outputs.sha }} \
+            -t ${{ steps.tags.outputs.ref }} \
+            -t ${{ steps.tags.outputs.latest }} \
+            ${{ matrix.service }}/
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.tags.outputs.sha }}
+          format: table
+          # exit-code 0 = warn only; change to 1 to block push on CRITICAL/HIGH findings
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Push to ECR
+        run: |
+          docker push ${{ steps.tags.outputs.sha }}
+          docker push ${{ steps.tags.outputs.ref }}
+          docker push ${{ steps.tags.outputs.latest }}
+
+      - name: Summary
+        run: |
+          echo "### Docker image pushed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | URI |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| sha | \`${{ steps.tags.outputs.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| ref | \`${{ steps.tags.outputs.ref }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| latest | \`${{ steps.tags.outputs.latest }}\` |" >> $GITHUB_STEP_SUMMARY

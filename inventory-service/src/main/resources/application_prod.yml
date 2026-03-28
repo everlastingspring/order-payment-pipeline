@@ -1,15 +1,13 @@
 spring:
   application:
-    name: order-service
-  profiles:
-    active: default
+    name: inventory-service
 
   threads:
     virtual:
       enabled: true
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/order_db
+    url: jdbc:postgresql://postgres:5432/inventory_db
     username: popuser
     password: poppass
     driver-class-name: org.postgresql.Driver
@@ -34,7 +32,7 @@ spring:
     baseline-on-migrate: true
 
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: kafka:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -44,20 +42,27 @@ spring:
         enable.idempotence: true
         max.in.flight.requests.per.connection: 1
     consumer:
-      group-id: order-service-group
+      group-id: inventory-service-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       auto-offset-reset: earliest
       enable-auto-commit: false
+      properties:
+        spring.json.trusted.packages: "com.paymentplatform.*"
 
   data:
     redis:
-      host: localhost
+      host: redis
       port: 6379
       password: redispass
 
+# Reservation TTL in minutes before auto-release
+inventory:
+  reservation:
+    ttl-minutes: 15
+
 server:
-  port: 8081
+  port: 8083
 
 management:
   endpoints:
@@ -78,7 +83,7 @@ management:
       type: w3c
   otlp:
     tracing:
-      endpoint: http://localhost:4318/v1/traces
+      endpoint: http://tempo:4318/v1/traces
 
 resilience4j:
   circuitbreaker:

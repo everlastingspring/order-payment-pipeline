@@ -8,8 +8,12 @@ import org.springframework.cloud.gateway.filter.ratelimit.KeyResolver;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.ReactiveSecurityContextHolder;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextImpl;
+import reactor.core.publisher.Mono;
 
-import java.security.Principal;
+import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -36,12 +40,21 @@ class RateLimiterConfigTest {
                     .build();
             MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
-            // When authenticated user is present, use their user ID
-            Principal principal = new UsernamePasswordAuthenticationToken("user-123", null);
-            // Note: In a real test, we'd set the principal on the exchange using a proper auth mechanism
+            // Inject authenticated principal into the reactive SecurityContext.
+            // exchange.getPrincipal() reads from ReactorContext, not a local variable —
+            // so we must use contextWrite to attach the SecurityContext to the Mono chain.
+            // 3-arg constructor sets authenticated=true, matching what Spring Security's
+            // JWT processor produces in production. The 2-arg form sets authenticated=false
+            // and would be filtered out by the isAuthenticated() check in the impl.
+            SecurityContext securityContext = new SecurityContextImpl(
+                    new UsernamePasswordAuthenticationToken("user-123", null, Collections.emptyList()));
 
-            String key = keyResolver.resolve(exchange).block();
-            assertThat(key).isNotNull().isNotBlank();
+            String key = keyResolver.resolve(exchange)
+                    .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(
+                            Mono.just(securityContext)))
+                    .block();
+
+            assertThat(key).isEqualTo("user-123");
         }
 
         @Test
@@ -81,7 +94,9 @@ class RateLimiterConfigTest {
             MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
             String key = keyResolver.resolve(exchange).block();
-            assertThat(key).isNotNull();
+            // Blank X-User-Id must be skipped (isBlank() check in impl);
+            // should fall through to first IP in X-Forwarded-For
+            assertThat(key).isEqualTo("203.0.113.50");
         }
 
         @Test
@@ -93,7 +108,9 @@ class RateLimiterConfigTest {
             MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
             String key = keyResolver.resolve(exchange).block();
-            assertThat(key).isNotNull().isNotBlank();
+            // No principal, no X-User-Id, no X-Forwarded-For, no remote address
+            // → implementation returns "anonymous" as the final fallback
+            assertThat(key).isEqualTo("anonymous");
         }
 
         @Test
@@ -105,10 +122,19 @@ class RateLimiterConfigTest {
                     .build();
             MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
-            // With authentication, should use principal name, not header
-            // This is the intended security behavior
-            String key = keyResolver.resolve(exchange).block();
-            assertThat(key).isNotNull();
+            // Inject a different principal (auth-user-123) alongside the X-User-Id header.
+            // Implementation resolves principal FIRST via exchange.getPrincipal() —
+            // so auth user must win over the header value.
+            SecurityContext securityContext = new SecurityContextImpl(
+                    new UsernamePasswordAuthenticationToken("auth-user-123", null, Collections.emptyList()));
+
+            String key = keyResolver.resolve(exchange)
+                    .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(
+                            Mono.just(securityContext)))
+                    .block();
+
+            assertThat(key).isEqualTo("auth-user-123");          // auth wins
+            assertThat(key).isNotEqualTo("header-user-999");     // header loses
         }
 
         @Test

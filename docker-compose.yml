@@ -80,7 +80,6 @@ services:
       timeout: 10s
       retries: 10
 
-
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: pop-kafka-ui

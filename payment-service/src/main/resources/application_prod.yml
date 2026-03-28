@@ -1,15 +1,13 @@
 spring:
   application:
-    name: order-service
-  profiles:
-    active: default
+    name: payment-service
 
   threads:
     virtual:
       enabled: true
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/order_db
+    url: jdbc:postgresql://postgres:5432/payment_db
     username: popuser
     password: poppass
     driver-class-name: org.postgresql.Driver
@@ -34,7 +32,7 @@ spring:
     baseline-on-migrate: true
 
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: kafka:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -44,20 +42,27 @@ spring:
         enable.idempotence: true
         max.in.flight.requests.per.connection: 1
     consumer:
-      group-id: order-service-group
+      group-id: payment-service-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       auto-offset-reset: earliest
       enable-auto-commit: false
+      properties:
+        spring.json.trusted.packages: "com.paymentplatform.*"
 
   data:
     redis:
-      host: localhost
+      host: redis
       port: 6379
       password: redispass
 
+# Idempotency key TTL (seconds) — Redis lock duration to prevent double charge
+payment:
+  idempotency:
+    ttl-seconds: 86400
+
 server:
-  port: 8081
+  port: 8082
 
 management:
   endpoints:
@@ -78,11 +83,19 @@ management:
       type: w3c
   otlp:
     tracing:
-      endpoint: http://localhost:4318/v1/traces
+      endpoint: http://tempo:4318/v1/traces
 
 resilience4j:
   circuitbreaker:
     instances:
+      paymentGateway:
+        register-health-indicator: true
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        sliding-window-type: COUNT_BASED
       kafkaPublisher:
         register-health-indicator: true
         sliding-window-size: 10
@@ -90,11 +103,28 @@ resilience4j:
         failure-rate-threshold: 50
         wait-duration-in-open-state: 15s
         permitted-number-of-calls-in-half-open-state: 3
-        sliding-window-type: COUNT_BASED
+  retry:
+    instances:
+      paymentGateway:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+  timelimiter:
+    instances:
+      paymentGateway:
+        timeout-duration: 5s
 
 outbox:
   processor:
     poll-interval-ms: 5000
+
+# Internal service URLs (local dev)
+# In EKS: override with ClusterIP service DNS (e.g. http://wallet-service:8085)
+services:
+  wallet:
+    base-url: http://wallet-service:8085
 
 logging:
   level:

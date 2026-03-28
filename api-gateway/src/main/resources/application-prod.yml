@@ -1,7 +1,112 @@
 # Production profile — enables JWT validation via Keycloak
+server:
+  port: 8080
+
 spring:
+  application:
+    name: api-gateway
+
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/payment-platform}
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://keycloak:8180/realms/payment-platform}
+
+  cloud:
+    gateway:
+      routes:
+        - id: order-service
+          uri: http://order-service:8081
+          predicates:
+            - Path=/api/orders/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                redis-rate-limiter.requestedTokens: 1
+
+        - id: payment-service
+          uri: http://payment-service:8082
+          predicates:
+            - Path=/api/payments/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                redis-rate-limiter.requestedTokens: 1
+
+        - id: inventory-service
+          uri: http://inventory-service:8083
+          predicates:
+            - Path=/api/inventory/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                redis-rate-limiter.requestedTokens: 1
+
+        - id: notification-service
+          uri: http://notification-service:8084
+          predicates:
+            - Path=/api/notifications/**
+
+        - id: wallet-service
+          uri: http://wallet-service:8085
+          predicates:
+            - Path=/api/wallets/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 5
+                redis-rate-limiter.burstCapacity: 10
+                redis-rate-limiter.requestedTokens: 1
+
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            allowedHeaders: "*"
+
+  data:
+    redis:
+      host: redis
+      port: 6379
+      password: redispass
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    sampling:
+      probability: 1.0
+    propagation:
+      type: w3c
+  otlp:
+    tracing:
+      endpoint: http://tempo:4318/v1/traces
+
+logging:
+  level:
+    com.paymentplatform: DEBUG
+    org.springframework.cloud.gateway: INFO

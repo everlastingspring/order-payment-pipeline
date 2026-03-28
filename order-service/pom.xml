@@ -95,11 +95,9 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.kafka</groupId>
-            <artifactId>spring-kafka-test</artifactId>
-            <scope>test</scope>
-        </dependency>
+        <!-- spring-kafka-test removed: project uses Testcontainers (real Kafka via Docker),
+             not embedded Kafka. Keeping it pulled in kafka-*-test JARs that each ship
+             a junit-platform.properties causing duplicate-file warnings on every test run. -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>

@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
                 "management.metrics.export.prometheus.enabled=false"
         }
 )
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = false)
 class WalletServiceIT {
 
     @Container

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Suppress Spring test context bootstrap INFO noise.
+         AnnotationConfigContextLoaderUtils logs "Could not detect default configuration
+         classes" for every nested test class — this is expected behaviour, not a problem. -->
+    <logger name="org.springframework.test.context.support.AnnotationConfigContextLoaderUtils"
+            level="WARN"/>
+
+    <!-- Keep test runner output readable -->
+    <logger name="org.springframework.boot.test"         level="WARN"/>
+    <logger name="org.springframework.test.context"      level="WARN"/>
+
+    <!-- Silence Testcontainers pull progress spam but keep connection info -->
+    <logger name="org.testcontainers.utility.ResourceReaper"  level="WARN"/>
+    <logger name="com.github.dockerjava"                      level="WARN"/>
+    <logger name="org.testcontainers.shaded"                  level="WARN"/>
+
+    <!-- Keep application and Kafka logs at INFO so test failures are diagnosable -->
+    <logger name="com.paymentplatform" level="INFO"/>
+    <logger name="org.springframework.kafka" level="INFO"/>
+
+    <root level="WARN">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

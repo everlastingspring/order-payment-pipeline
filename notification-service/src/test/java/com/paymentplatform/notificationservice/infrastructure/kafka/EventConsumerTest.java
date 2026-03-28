@@ -99,6 +99,31 @@ class EventConsumerTest {
         }
 
         @Test
+        @DisplayName("should handle null orderId without NullPointerException")
+        void handleOrderCreated_nullOrderId() throws Exception {
+            // A malformed event with null orderId must not crash the consumer
+            // (safeShortId() returns "unknown" instead of calling .substring on null)
+            OrderCreatedEventTest event = new OrderCreatedEventTest(
+                    null, "customer-001", "test@example.com",
+                    new MoneyDto(new BigDecimal("4097.00"), "INR"),
+                    UUID.randomUUID()
+            );
+            String payload = objectMapper.writeValueAsString(event);
+
+            eventConsumer.handleOrderCreated(payload, acknowledgment);
+
+            verify(notificationService).sendNotification(
+                    anyString(), anyString(), any(),
+                    contains("unknown"),   // safeShortId fallback must appear in subject
+                    anyString(),
+                    eq(KafkaTopics.ORDER_CREATED + ":null"),
+                    eq(KafkaTopics.ORDER_CREATED),
+                    anyString()
+            );
+            verify(acknowledgment).acknowledge();
+        }
+
+        @Test
         @DisplayName("should rethrow exception on JSON parse error")
         void handleOrderCreated_invalidJson() {
             String invalidPayload = "invalid json";

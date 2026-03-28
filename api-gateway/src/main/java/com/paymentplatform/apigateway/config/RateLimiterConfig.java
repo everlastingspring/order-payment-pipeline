@@ -3,9 +3,9 @@ package com.paymentplatform.apigateway.config;
 import org.springframework.cloud.gateway.filter.ratelimit.KeyResolver;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import reactor.core.publisher.Mono;
-
-import java.security.Principal;
 
 /**
  * Defines how the Redis rate limiter identifies callers.
@@ -25,8 +25,16 @@ public class RateLimiterConfig {
 
     @Bean
     public KeyResolver userKeyResolver() {
-        return exchange -> exchange.getPrincipal()
-                .map(Principal::getName)
+        return exchange -> ReactiveSecurityContextHolder.getContext()
+                // Extract principal name from the ReactorContext — this works both in
+                // production (SecurityContextServerWebExchangeWebFilter populates it) and
+                // in unit tests (contextWrite(ReactiveSecurityContextHolder.withSecurityContext(...))).
+                // exchange.getPrincipal() is intentionally avoided: MockServerWebExchange does not
+                // populate principal from the ReactorContext, making it untestable without a filter chain.
+                .map(ctx -> ctx.getAuthentication())
+                .filter(auth -> auth != null && auth.isAuthenticated()
+                        && !"anonymousUser".equals(auth.getName()))
+                .map(Authentication::getName)
                 .switchIfEmpty(Mono.defer(() -> {
                     // Fallback 1: explicit header (useful for local dev / testing)
                     String userId = exchange.getRequest().getHeaders().getFirst("X-User-Id");

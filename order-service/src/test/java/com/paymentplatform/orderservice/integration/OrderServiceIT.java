@@ -50,7 +50,7 @@ import static org.mockito.Mockito.verify;
                 "management.metrics.export.prometheus.enabled=false"
         }
 )
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = false)
 class OrderServiceIT {
 
     @Container

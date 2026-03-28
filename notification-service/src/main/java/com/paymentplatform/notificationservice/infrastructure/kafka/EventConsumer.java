@@ -36,7 +36,7 @@ public class EventConsumer {
                     event.getCustomerId(),
                     event.getCustomerEmail(),
                     NotificationType.ORDER_CONFIRMATION,
-                    "Order Received — #" + event.getOrderId().substring(0, 8),
+                    "Order Received — #" + safeShortId(event.getOrderId()),
                     buildOrderCreatedBody(event),
                     buildReferenceId(KafkaTopics.ORDER_CREATED, event.getOrderId()),
                     KafkaTopics.ORDER_CREATED,
@@ -62,7 +62,7 @@ public class EventConsumer {
                     event.getCustomerId(),
                     event.getCustomerEmail(),
                     NotificationType.PAYMENT_SUCCESS,
-                    "Payment Successful — Order #" + event.getOrderId().substring(0, 8),
+                    "Payment Successful — Order #" + safeShortId(event.getOrderId()),
                     buildPaymentCompletedBody(event),
                     buildReferenceId(KafkaTopics.PAYMENT_COMPLETED, event.getOrderId()),
                     KafkaTopics.PAYMENT_COMPLETED,
@@ -88,7 +88,7 @@ public class EventConsumer {
                     event.getCustomerId(),
                     event.getCustomerEmail(),
                     NotificationType.PAYMENT_FAILURE,
-                    "Payment Failed — Order #" + event.getOrderId().substring(0, 8),
+                    "Payment Failed — Order #" + safeShortId(event.getOrderId()),
                     buildPaymentFailedBody(event),
                     buildReferenceId(KafkaTopics.PAYMENT_FAILED, event.getOrderId()),
                     KafkaTopics.PAYMENT_FAILED,
@@ -114,7 +114,7 @@ public class EventConsumer {
                     event.getCustomerId(),
                     event.getCustomerEmail(),
                     NotificationType.ORDER_CONFIRMATION,
-                    "Order Confirmed — #" + event.getOrderId().substring(0, 8),
+                    "Order Confirmed — #" + safeShortId(event.getOrderId()),
                     buildOrderCompletedBody(event),
                     buildReferenceId(KafkaTopics.ORDER_COMPLETED, event.getOrderId()),
                     KafkaTopics.ORDER_COMPLETED,
@@ -140,7 +140,7 @@ public class EventConsumer {
                     event.getCustomerId(),
                     event.getCustomerEmail(),
                     NotificationType.ORDER_CANCELLED,
-                    "Order Cancelled — #" + event.getOrderId().substring(0, 8),
+                    "Order Cancelled — #" + safeShortId(event.getOrderId()),
                     buildOrderCancelledBody(event),
                     buildReferenceId(KafkaTopics.ORDER_CANCELLED, event.getOrderId()),
                     KafkaTopics.ORDER_CANCELLED,
@@ -166,7 +166,7 @@ public class EventConsumer {
                     event.getCustomerId(),
                     event.getCustomerEmail(),
                     NotificationType.ORDER_FAILED,
-                    "Order Failed — #" + event.getOrderId().substring(0, 8),
+                    "Order Failed — #" + safeShortId(event.getOrderId()),
                     buildOrderFailedBody(event),
                     buildReferenceId(KafkaTopics.ORDER_FAILED, event.getOrderId()),
                     KafkaTopics.ORDER_FAILED,
@@ -183,38 +183,47 @@ public class EventConsumer {
 
     private String buildOrderCreatedBody(OrderCreatedEvent e) {
         return String.format("Your order #%s has been received. Total: %s %s. We're processing it now.",
-                e.getOrderId().substring(0, 8), e.getTotalAmount().getAmount(), e.getTotalAmount().getCurrency());
+                safeShortId(e.getOrderId()), e.getTotalAmount().getAmount(), e.getTotalAmount().getCurrency());
     }
 
     private String buildPaymentCompletedBody(PaymentCompletedEvent e) {
         return String.format("Payment of %s %s for order #%s was successful. Transaction ref: %s",
                 e.getAmount().getAmount(), e.getAmount().getCurrency(),
-                e.getOrderId().substring(0, 8), e.getTransactionReference());
+                safeShortId(e.getOrderId()), e.getTransactionReference());
     }
 
     private String buildPaymentFailedBody(PaymentFailedEvent e) {
         return String.format("Payment of %s %s for order #%s failed. Reason: %s. Please try again.",
                 e.getAttemptedAmount().getAmount(), e.getAttemptedAmount().getCurrency(),
-                e.getOrderId().substring(0, 8), e.getFailureReason());
+                safeShortId(e.getOrderId()), e.getFailureReason());
     }
 
     private String buildOrderCompletedBody(OrderCompletedEvent e) {
         return String.format("Your order #%s is confirmed! Total: %s %s. Thank you for your purchase.",
-                e.getOrderId().substring(0, 8), e.getTotalAmount().getAmount(), e.getTotalAmount().getCurrency());
+                safeShortId(e.getOrderId()), e.getTotalAmount().getAmount(), e.getTotalAmount().getCurrency());
     }
 
     private String buildOrderCancelledBody(OrderCancelledEvent e) {
         return String.format("Your order #%s has been cancelled. Reason: %s",
-                e.getOrderId().substring(0, 8), e.getCancellationReason());
+                safeShortId(e.getOrderId()), e.getCancellationReason());
     }
 
     private String buildOrderFailedBody(OrderFailedEvent e) {
         return String.format("We're sorry, your order #%s could not be completed. Reason: %s. "
                         + "No payment has been charged.",
-                e.getOrderId().substring(0, 8), e.getFailureReason());
+                safeShortId(e.getOrderId()), e.getFailureReason());
     }
 
     private String buildReferenceId(String topic, String orderId) {
         return topic + ":" + orderId;
+    }
+
+    /**
+     * Returns the first 8 characters of orderId for use in notification subjects/bodies.
+     * Guards against null orderId (malformed events) and IDs shorter than 8 characters.
+     */
+    private String safeShortId(String orderId) {
+        if (orderId == null) return "unknown";
+        return orderId.length() >= 8 ? orderId.substring(0, 8) : orderId;
     }
 }

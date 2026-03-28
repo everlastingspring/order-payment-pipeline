@@ -43,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         }
 )
 @Transactional
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = false)
 class InventoryServiceIT {
 
     @Container

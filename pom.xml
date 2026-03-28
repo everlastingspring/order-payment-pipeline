@@ -49,8 +49,8 @@
             ${project.basedir}/target/site/jacoco/jacoco.xml
         </sonar.coverage.jacoco.xmlReportPaths>
         <!-- OWASP Dependency-Check
-             12.1.0 fixes NVD CVSS v4 "SAFETY" enum parse crash (CvssV4Data$ModifiedCiaType) -->
-        <dependency-check.version>12.1.0</dependency-check.version>
+             12.2.0 fixes SAFETY enum parse crash + CveEcosystemMapper NPE on CVE-2026-2484 -->
+        <dependency-check.version>12.2.0</dependency-check.version>
     </properties>
 
     <dependencyManagement>
@@ -165,6 +165,9 @@
                             <format>HTML</format>
                             <format>JSON</format>
                         </formats>
+                        <!-- Explicit data directory so GitHub Actions cache path is predictable.
+                             Without this the plugin uses an internal default that may vary by version. -->
+                        <dataDirectory>${user.home}/.owasp-dependency-check</dataDirectory>
                     </configuration>
                 </plugin>
                 <plugin>

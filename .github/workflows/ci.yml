@@ -105,9 +105,11 @@ jobs:
         # cache-hit → skip NVD update, data already fresh this week
         # cache-miss → pull latest CVEs from NVD (once per week)
         # enableMemorySegments=false → silences Lucene vector incubator warning on Java 21
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           mvn dependency-check:aggregate --batch-mode -DskipTests \
-            -DnvdApiKey=${{ secrets.NVD_API_KEY }} \
+            -DnvdApiKey="$NVD_API_KEY" \
             -Dorg.apache.lucene.store.MMapDirectory.enableMemorySegments=false \
             ${{ steps.nvd-cache.outputs.cache-hit == 'true' && '-DautoUpdate=false' || '' }}
         continue-on-error: true

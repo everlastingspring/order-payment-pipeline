@@ -14,7 +14,7 @@ env:
 # ── BUILD + TEST ───────────────────────────────────────────────────────
 jobs:
   build:
-    name: Build & Test (unit + IT)
+    name: Build, Test (unit + IT) & Upload
     runs-on: ubuntu-latest
 
     steps:
@@ -27,18 +27,22 @@ jobs:
           distribution: temurin
           cache: maven
 
-      - name: Build and run all tests
-        run: mvn clean install --batch-mode
+      - name: Clean Install
+        # -T 1C uses parallel CPU cores. 1 thread per core running all modules in parallel
+        # 'install' makes common-lib available to other modules.
+        run: mvn clean install -B -T 1C
 
-      - name: Upload test reports
+      - name: Upload Artifacts (JARs + Reports)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: build-assets
           path: |
+            **/target/*.jar
+            **/target/site/jacoco/
             **/target/surefire-reports/
             **/target/failsafe-reports/
-          retention-days: 7
+          retention-days: 1
 
 # ── COVERAGE + SONARCLOUD ────────────────────────────────────────────
   quality:
@@ -65,9 +69,15 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
 
+      - name: Download Build Assets
+        uses: actions/download-artifact@v4
+        with:
+          name: build-assets
+
       - name: JaCoCo check + SonarCloud analysis
-        # sonar:sonar resolves to the version pinned in pluginManagement (avoids "unspecified version" warning)
-        run: mvn -B verify sonar:sonar -DskipITs=true
+        # We skip tests because we already have the reports in the target folder.
+        # Sonar will automatically find the Jacoco XMLs.
+        run: mvn sonar:sonar -B -DskipTests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -158,8 +168,10 @@ jobs:
           distribution: temurin
           cache: maven
 
-      - name: Build JAR  # -am also builds common-lib
-        run: mvn package -DskipTests --batch-mode -pl ${{ matrix.service }} -am
+      - name: Download JARs  # download the jars from build stage
+        uses: actions/download-artifact@v4
+        with:
+          name: build-assets
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -181,6 +193,11 @@ jobs:
           echo "sha=$REPO:$SHA_SHORT"  >> $GITHUB_OUTPUT
           echo "ref=$REPO:$REF_SLUG"   >> $GITHUB_OUTPUT
           echo "latest=$REPO:latest"   >> $GITHUB_OUTPUT
+
+      - name: Prepare Docker Context
+        run: |
+          mkdir -p ${{ matrix.service }}/target
+          cp **/target/${{ matrix.service }}-*.jar ${{ matrix.service }}/target/
 
       - name: Build Docker image
         run: |

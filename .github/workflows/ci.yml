@@ -77,7 +77,8 @@ jobs:
       - name: JaCoCo check + SonarCloud analysis
         # We skip tests because we already have the reports in the target folder.
         # Sonar will automatically find the Jacoco XMLs.
-        run: mvn sonar:sonar -B -DskipTests
+        # compile so the /target/classes are visible
+        run: mvn compile sonar:sonar -B -DskipTests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

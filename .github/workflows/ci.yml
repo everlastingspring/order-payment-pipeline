@@ -162,13 +162,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: temurin
-          cache: maven
-
       - name: Download JARs  # download the jars from build stage
         uses: actions/download-artifact@v4
         with:
@@ -194,11 +187,6 @@ jobs:
           echo "sha=$REPO:$SHA_SHORT"  >> $GITHUB_OUTPUT
           echo "ref=$REPO:$REF_SLUG"   >> $GITHUB_OUTPUT
           echo "latest=$REPO:latest"   >> $GITHUB_OUTPUT
-
-      - name: Prepare Docker Context
-        run: |
-          mkdir -p ${{ matrix.service }}/target
-          cp **/target/${{ matrix.service }}-*.jar ${{ matrix.service }}/target/
 
       - name: Build Docker image
         run: |

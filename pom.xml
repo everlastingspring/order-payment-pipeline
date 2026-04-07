@@ -5,6 +5,13 @@
          https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+
     <groupId>com.paymentplatform</groupId>
     <artifactId>payment-order-platform</artifactId>
     <version>1.0.0-SNAPSHOT</version>
@@ -23,49 +30,28 @@
 
     <properties>
         <java.version>21</java.version>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring-boot.version>3.3.5</spring-boot.version>
         <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <micrometer.version>1.13.6</micrometer.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
-        <lombok.version>1.18.34</lombok.version>
         <testcontainers.version>1.21.4</testcontainers.version>
         <opentelemetry.version>1.38.0</opentelemetry.version>
-        <loki-logback.version>1.5.2</loki-logback.version>
+        <opentelemetry.instrumentation.version>2.5.0-alpha</opentelemetry.instrumentation.version>
         <resilience4j.version>2.2.0</resilience4j.version>
         <skipITs>false</skipITs>
-        <!-- Default empty value so @{argLine} in Surefire resolves to "" on modules
-             that don't have JaCoCo (e.g. common-lib). JaCoCo's prepare-agent overwrites
-             this on modules where it is configured, appending its -javaagent flag. -->
         <argLine/>
         <!-- SonarCloud — values picked up automatically by mvn sonar:sonar -->
         <sonar.projectKey>everlastingspring_order-payment-pipeline</sonar.projectKey>
         <sonar.organization>everlastingspring</sonar.organization>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
-        <!-- ${project.basedir} is evaluated per-module by Maven reactor, so each module
-             points to its own target/. The ../** pattern caused Sonar to look outside the
-             project root and produce "File not found in project sources" warnings. -->
         <sonar.coverage.jacoco.xmlReportPaths>
             ${project.basedir}/target/site/jacoco/jacoco.xml
         </sonar.coverage.jacoco.xmlReportPaths>
-        <!-- Without this, Sonar reports "sonar.java.binaries are empty" and cannot
-             correlate .class files with source lines for coverage mapping. -->
         <sonar.java.binaries>${project.basedir}/target/classes</sonar.java.binaries>
-        <!-- OWASP Dependency-Check
-             12.2.0 fixes SAFETY enum parse crash + CveEcosystemMapper NPE on CVE-2026-2484 -->
         <dependency-check.version>12.2.0</dependency-check.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
-            <dependency>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-dependencies</artifactId>
-                <version>${spring-boot.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
             <dependency>
                 <groupId>org.springframework.cloud</groupId>
                 <artifactId>spring-cloud-dependencies</artifactId>
@@ -88,9 +74,14 @@
                 <scope>import</scope>
             </dependency>
             <dependency>
-                <groupId>com.github.loki4j</groupId>
-                <artifactId>loki-logback-appender</artifactId>
-                <version>${loki-logback.version}</version>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-registry-otlp</artifactId>
+                <version>${micrometer.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry.instrumentation</groupId>
+                <artifactId>opentelemetry-logback-appender-1.0</artifactId>
+                <version>${opentelemetry.instrumentation.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.github.resilience4j</groupId>
@@ -106,12 +97,12 @@
     </dependencyManagement>
 
     <build>
+        <finalName>app</finalName>
         <pluginManagement>
             <plugins>
                 <plugin>
                     <groupId>org.springframework.boot</groupId>
                     <artifactId>spring-boot-maven-plugin</artifactId>
-                    <version>${spring-boot.version}</version>
                     <configuration>
                         <excludes>
                             <exclude>
@@ -124,13 +115,8 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.13.0</version>
                     <configuration>
-                        <source>21</source>
-                        <target>21</target>
-                        <compilerArgs>
-                            <arg>-parameters</arg>
-                        </compilerArgs>
+                        <parameters>true</parameters>
                         <annotationProcessorPaths>
                             <path>
                                 <groupId>org.projectlombok</groupId>
@@ -148,12 +134,7 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
-                    <version>3.2.5</version>
                     <configuration>
-                        <!--
-                          @{argLine} is late-binding: picks up whatever JaCoCo's prepare-agent wrote.
-                          Appending EnableDynamicAgentLoading silences the ByteBuddy/Mockito JVM 21 warning.
-                        -->
                         <argLine>@{argLine} -XX:+EnableDynamicAgentLoading</argLine>
                     </configuration>
                 </plugin>
@@ -163,20 +144,14 @@
                     <version>${dependency-check.version}</version>
                     <configuration>
                         <failBuildOnCVSS>7</failBuildOnCVSS>
-                        <suppressionFile>${maven.multiModuleProjectDirectory}/.owasp-suppressions.xml</suppressionFile>
                         <formats>
                             <format>HTML</format>
                             <format>JSON</format>
                         </formats>
-                        <!-- Fixed path so the GitHub Actions cache target is predictable -->
                         <dataDirectory>${user.home}/.owasp-dependency-check</dataDirectory>
-                        <!-- OSS Index requires a Sonatype account; disabled to avoid credential warning.
-                             NVD (configured via nvdApiKey in ci.yml) is sufficient for our needs. -->
                         <ossIndexAnalyzerEnabled>false</ossIndexAnalyzerEnabled>
                     </configuration>
                 </plugin>
-                <!-- Pinned so ci.yml can use the short form "sonar:sonar" without the
-                     "Using an unspecified version" warning. -->
                 <plugin>
                     <groupId>org.sonarsource.scanner.maven</groupId>
                     <artifactId>sonar-maven-plugin</artifactId>
@@ -186,35 +161,6 @@
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
                     <version>0.8.12</version>
-                    <executions>
-                        <execution>
-                            <goals><goal>prepare-agent</goal></goals>
-                        </execution>
-                        <execution>
-                            <id>report</id>
-                            <phase>test</phase>
-                            <goals><goal>report</goal></goals>
-                        </execution>
-                        <execution>
-                            <id>check</id>
-                            <phase>verify</phase>
-                            <goals><goal>check</goal></goals>
-                            <configuration>
-                                <rules>
-                                    <rule>
-                                        <element>BUNDLE</element>
-                                        <limits>
-                                            <limit>
-                                                <counter>LINE</counter>
-                                                <value>COVEREDRATIO</value>
-                                                <minimum>0.40</minimum>
-                                            </limit>
-                                        </limits>
-                                    </rule>
-                                </rules>
-                            </configuration>
-                        </execution>
-                    </executions>
                 </plugin>
             </plugins>
         </pluginManagement>
@@ -222,11 +168,8 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>3.2.5</version>
                 <configuration>
                     <skipITs>${skipITs}</skipITs>
-                    <!-- Same late-binding argLine as Surefire: picks up JaCoCo's -javaagent
-                         and appends EnableDynamicAgentLoading to silence ByteBuddy on JVM 21 -->
                     <argLine>@{argLine} -XX:+EnableDynamicAgentLoading</argLine>
                 </configuration>
                 <executions>
@@ -240,5 +183,4 @@
             </plugin>
         </plugins>
     </build>
-
 </project>

@@ -99,6 +99,7 @@ class WalletServiceTest {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, new BigDecimal("5000.00"));
             when(walletRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
             when(ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
                     walletId, "order:" + ORDER_ID, WalletTransactionType.DEBIT)).thenReturn(false);
             when(walletRepository.save(any())).thenAnswer(i -> i.getArgument(0));
@@ -126,6 +127,7 @@ class WalletServiceTest {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, new BigDecimal("5000.00"));
             when(walletRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
             when(ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
                     walletId, "order:" + ORDER_ID, WalletTransactionType.DEBIT)).thenReturn(true);
             WalletDto dto = stubWalletDto(walletId, new BigDecimal("5000.00"));
@@ -152,6 +154,7 @@ class WalletServiceTest {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, new BigDecimal("100.00"));
             when(walletRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
             when(ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
                     walletId, "order:" + ORDER_ID, WalletTransactionType.DEBIT)).thenReturn(false);
 
@@ -172,6 +175,7 @@ class WalletServiceTest {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, new BigDecimal("5000.00"));
             when(walletRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
             when(ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
                     walletId, "order:" + ORDER_ID, WalletTransactionType.DEBIT)).thenReturn(false);
             when(walletRepository.save(any()))
@@ -209,6 +213,8 @@ class WalletServiceTest {
                 }
                 return w;
             });
+            // After creation, the locked fetch must find the new wallet
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(newWallet));
             when(ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
                     any(), any(), any())).thenReturn(false);
             when(walletMapper.toDto(any())).thenReturn(stubWalletDto(walletId, BigDecimal.ZERO));
@@ -239,6 +245,7 @@ class WalletServiceTest {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, new BigDecimal("1000.00"));
             when(walletRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
             when(walletRepository.save(any())).thenAnswer(i -> i.getArgument(0));
             WalletDto dto = stubWalletDto(walletId, new BigDecimal("6000.00"));
             when(walletMapper.toDto(any())).thenReturn(dto);
@@ -262,6 +269,7 @@ class WalletServiceTest {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, BigDecimal.ZERO);
             when(walletRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
             when(walletRepository.save(any())).thenAnswer(i -> i.getArgument(0));
             when(walletMapper.toDto(any())).thenReturn(stubWalletDto(walletId, new BigDecimal("100.00")));
 
@@ -291,6 +299,7 @@ class WalletServiceTest {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, new BigDecimal("903.00"));
             when(walletRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
             when(ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
                     walletId, "refund:" + ORDER_ID, WalletTransactionType.REFUND)).thenReturn(false);
             when(walletRepository.save(any())).thenAnswer(i -> i.getArgument(0));
@@ -350,6 +359,7 @@ class WalletServiceTest {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, new BigDecimal("5000.00"));
             when(walletRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
             when(ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
                     walletId, "refund:" + ORDER_ID, WalletTransactionType.REFUND)).thenReturn(true);
             WalletDto dto = stubWalletDto(walletId, new BigDecimal("5000.00"));
@@ -371,6 +381,7 @@ class WalletServiceTest {
             Wallet wallet = buildWallet(walletId, new BigDecimal("903.00"));
             Wallet reloadedWallet = buildWallet(walletId, new BigDecimal("903.00"));
             when(walletRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByCustomerIdForUpdate(CUSTOMER_ID)).thenReturn(Optional.of(wallet));
             when(ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
                     walletId, "refund:" + ORDER_ID, WalletTransactionType.REFUND)).thenReturn(false);
             when(walletRepository.save(any()))
@@ -521,7 +532,7 @@ class WalletServiceTest {
         void mismatch_correctsBalance() {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, new BigDecimal("5000.00"));
-            when(walletRepository.findById(walletId)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByIdForUpdate(walletId)).thenReturn(Optional.of(wallet));
             when(ledgerEntryRepository.computeBalance(walletId)).thenReturn(new BigDecimal("4500.00"));
             when(walletRepository.save(any())).thenAnswer(i -> i.getArgument(0));
             WalletDto dto = stubWalletDto(walletId, new BigDecimal("4500.00"));
@@ -539,7 +550,7 @@ class WalletServiceTest {
         void match_noSave() {
             UUID walletId = UUID.randomUUID();
             Wallet wallet = buildWallet(walletId, new BigDecimal("5000.00"));
-            when(walletRepository.findById(walletId)).thenReturn(Optional.of(wallet));
+            when(walletRepository.findByIdForUpdate(walletId)).thenReturn(Optional.of(wallet));
             when(ledgerEntryRepository.computeBalance(walletId)).thenReturn(new BigDecimal("5000.00"));
             WalletDto dto = stubWalletDto(walletId, new BigDecimal("5000.00"));
             when(walletMapper.toDto(wallet)).thenReturn(dto);
@@ -554,7 +565,7 @@ class WalletServiceTest {
         @DisplayName("throws ResourceNotFoundException when wallet not found")
         void notFound_throwsResourceNotFoundException() {
             UUID walletId = UUID.randomUUID();
-            when(walletRepository.findById(walletId)).thenReturn(Optional.empty());
+            when(walletRepository.findByIdForUpdate(walletId)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> walletService.rebuildBalance(walletId))
                     .isInstanceOf(ResourceNotFoundException.class);

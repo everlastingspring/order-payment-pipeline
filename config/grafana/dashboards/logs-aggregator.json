@@ -1,0 +1,31 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "gridPos": { "h": 24, "w": 24, "x": 0, "y": 0 },
+  "id": 1,
+  "options": {
+    "dedupStrategy": "none",
+    "enableLogDetails": true,
+    "prettifyLogMessage": false,
+    "showCommonLabels": false,
+    "showLabels": false,
+    "showTime": true,
+    "sortOrder": "Descending",
+    "wrapLogMessage": false
+  },
+  "title": "Centralized Application Logs",
+  "type": "logs",
+  "targets": [
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "editorMode": "code",
+      "expr": "{exporter=\"OTLP\"}",
+      "queryType": "range",
+      "refId": "A"
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "4. Log Aggregator",
+  "uid": "log_aggregator",
+  "version": 1
+}

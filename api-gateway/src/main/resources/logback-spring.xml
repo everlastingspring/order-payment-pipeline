@@ -10,33 +10,20 @@
         </encoder>
     </appender>
 
-    <!-- Loki appender — pushes structured JSON logs directly to Loki -->
+    <!-- OTel appender — bridges to the OTel SDK; otel-collector forwards to Loki -->
     <springProfile name="!test">
-        <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
-            <http>
-                <url>http://localhost:3100/loki/api/v1/push</url>
-            </http>
-            <format>
-                <label>
-                    <pattern>application=${APP_NAME},level=%level,host=${HOSTNAME}</pattern>
-                </label>
-                <message>
-                    <pattern>
-                        {"timestamp":"%d{yyyy-MM-dd'T'HH:mm:ss.SSS'Z'}","level":"%level","logger":"%logger{36}","thread":"%thread","traceId":"%X{traceId:-}","spanId":"%X{spanId:-}","message":"%msg%n"}
-                    </pattern>
-                </message>
-                <sortByTime>true</sortByTime>
-            </format>
+        <appender name="OpenTelemetry" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+            <captureExperimentalAttributes>true</captureExperimentalAttributes>
+            <captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
         </appender>
     </springProfile>
 
     <!-- Log levels -->
     <logger name="com.paymentplatform" level="DEBUG"/>
     <logger name="org.springframework.kafka" level="INFO"/>
-    <logger name="org.hibernate.SQL" level="DEBUG"/>
     <logger name="org.apache.kafka" level="WARN"/>
 
-    <!-- Root: console always, Loki when not testing -->
+    <!-- Root: console always, OTel when not testing -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
     </root>
@@ -44,7 +31,7 @@
     <springProfile name="!test">
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
-            <appender-ref ref="LOKI"/>
+            <appender-ref ref="OpenTelemetry"/>
         </root>
     </springProfile>
 

@@ -52,7 +52,13 @@ public class WalletService {
         BigDecimal amount = request.getAmount();
         String currency = request.getCurrency();
 
-        Wallet wallet = findOrCreateWallet(customerId, currency);
+        // Ensure wallet row exists before locking (creation is idempotent)
+        findOrCreateWallet(customerId, currency);
+
+        // Acquire exclusive row lock — blocks any concurrent debit/credit for this customer
+        // until this transaction commits. Prevents lost-update on balance.
+        Wallet wallet = walletRepository.findByCustomerIdForUpdate(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Wallet", customerId));
 
         // Idempotency — skip if this order was already debited
         if (ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
@@ -92,7 +98,12 @@ public class WalletService {
                 : "Wallet top-up";
         String referenceId = "topup:" + UUID.randomUUID();
 
-        Wallet wallet = findOrCreateWallet(customerId, currency);
+        // Ensure wallet exists before locking
+        findOrCreateWallet(customerId, currency);
+
+        // Acquire exclusive row lock — concurrent top-ups must queue, not race
+        Wallet wallet = walletRepository.findByCustomerIdForUpdate(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Wallet", customerId));
 
         wallet.credit(amount, referenceId, description);
         walletRepository.save(wallet);
@@ -120,8 +131,14 @@ public class WalletService {
         }
 
         String referenceId = "refund:" + orderId;
-        Wallet wallet = findOrCreateWallet(customerId, refundAmount.getCurrency() != null
-                ? refundAmount.getCurrency() : "INR");
+        String currency = refundAmount.getCurrency() != null ? refundAmount.getCurrency() : "INR";
+
+        // Ensure wallet exists before locking
+        findOrCreateWallet(customerId, currency);
+
+        // Acquire exclusive row lock — prevents concurrent refund/debit race on same wallet
+        Wallet wallet = walletRepository.findByCustomerIdForUpdate(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Wallet", customerId));
 
         // Idempotency — skip if already refunded
         if (ledgerEntryRepository.existsByWalletIdAndReferenceIdAndTransactionType(
@@ -194,7 +211,8 @@ public class WalletService {
      */
     @Transactional
     public WalletDto rebuildBalance(UUID walletId) {
-        Wallet wallet = walletRepository.findById(walletId)
+        // Lock the wallet row — prevents a concurrent payment overwriting the corrected balance
+        Wallet wallet = walletRepository.findByIdForUpdate(walletId)
                 .orElseThrow(() -> new ResourceNotFoundException("Wallet", walletId));
 
         BigDecimal computed = ledgerEntryRepository.computeBalance(walletId);

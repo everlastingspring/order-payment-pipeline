@@ -116,14 +116,20 @@ jobs:
         # cache-hit → skip NVD update, data already fresh this week
         # cache-miss → pull latest CVEs from NVD (once per week)
         # enableMemorySegments=false → silences Lucene vector incubator warning on Java 21
+        # suppressionFiles → wires the checked-in suppression list so false-positives
+        #   and shaded-artifact CVEs do not fail the build
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           mvn dependency-check:aggregate --batch-mode -DskipTests \
             -DnvdApiKey="$NVD_API_KEY" \
             -Dorg.apache.lucene.store.MMapDirectory.enableMemorySegments=false \
+            -DsuppressionFiles=".owasp-suppressions.xml" \
             ${{ steps.nvd-cache.outputs.cache-hit == 'true' && '-DautoUpdate=false' || '' }}
-        continue-on-error: true
+        # continue-on-error removed: with CVE pins + suppressions in place the
+        # scan should pass cleanly.  Uncomment if a net-new CVE is published
+        # mid-sprint and you need to merge anyway:
+        # continue-on-error: true
 
       - name: Upload OWASP report
         if: always()

@@ -1,0 +1,848 @@
+{
+  "info": {
+    "_postman_id": "5c1b9f13-5800-4481-b4a1-e0010f995467",
+    "name": "Payment Order Platform",
+    "description": "Complete smoke test collection for the Payment Order Platform.\n\n**Run order:**\n1. Auth → get token\n2. Wallet Setup → top-up wallet BEFORE creating any order\n3. Inventory → verify seed data\n4. Happy Path Saga → full flow\n5. Compensation sagas as needed\n\n**Environment variables required:**\nbase_url, keycloak_url, realm, client_id, username, password, customer_id\n\n**Auto-saved by tests:**\ntoken, order_id, order_id_oos, order_id_insuf, wallet_id",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "1. Get Keycloak Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.environment.set('token', json.access_token);",
+                  "pm.test('Token received', () => pm.expect(json.access_token).to.be.a('string'));",
+                  "console.log('Token saved:', json.access_token ? 'OK' : 'FAILED');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password" },
+                { "key": "client_id",  "value": "{{client_id}}" },
+                { "key": "username",   "value": "{{username}}" },
+                { "key": "password",   "value": "{{password}}" }
+              ]
+            },
+            "url": {
+              "raw": "{{keycloak_url}}/realms/{{realm}}/protocol/openid-connect/token",
+              "host": ["{{keycloak_url}}"],
+              "path": ["realms","{{realm}}","protocol","openid-connect","token"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Wallet",
+      "item": [
+        {
+          "name": "2. Top Up Wallet (run before ordering)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Top-up successful', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('wallet_id', json.data.walletId);",
+                  "console.log('Wallet balance after top-up:', json.data.balance?.amount, json.data.balance?.currency);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10000,\n  \"currency\": \"INR\",\n  \"description\": \"Test top-up\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/wallets/customer/{{customer_id}}/topup",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","customer","{{customer_id}}","topup"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3. Get Wallet Balance (quick check)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Balance returned', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Current balance:', json.data.amount, json.data.currency);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/customer/{{customer_id}}/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","customer","{{customer_id}}","balance"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. Get Wallet by Customer (full)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Wallet retrieved', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('wallet_id', json.data.walletId);",
+                  "console.log('Wallet ID saved:', json.data.walletId);",
+                  "console.log('Balance:', json.data.balance?.amount, json.data.balance?.currency);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/customer/{{customer_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","customer","{{customer_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5. Get Wallet Ledger",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/{{wallet_id}}/ledger",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","{{wallet_id}}","ledger"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6. Rebuild Wallet Balance (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/{{wallet_id}}/rebuild",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","{{wallet_id}}","rebuild"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "item": [
+        {
+          "name": "7. Get All Inventory (verify seed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('5 products returned', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.data).to.have.lengthOf(5);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/inventory",
+              "host": ["{{base_url}}"],
+              "path": ["api","inventory"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8. Get Inventory - Wireless Mouse",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Mouse inventory returned', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Available:', json.data.availableQuantity, '| Reserved:', json.data.reservedQuantity, '| Status:', json.data.status);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/a1b2c3d4-0000-0000-0000-000000000001",
+              "host": ["{{base_url}}"],
+              "path": ["api","inventory","a1b2c3d4-0000-0000-0000-000000000001"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "9. Get Low Stock (threshold=10)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Low stock list returned', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Low stock items:', json.data?.length);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/low-stock?threshold=10",
+              "host": ["{{base_url}}"],
+              "path": ["api","inventory","low-stock"],
+              "query": [{ "key": "threshold", "value": "10" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10. Restock Webcam HD (OUT_OF_STOCK → AVAILABLE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Restock successful', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Status is AVAILABLE', () => pm.expect(json.data.status).to.eql('AVAILABLE'));",
+                  "console.log('Webcam stock after restock:', json.data.availableQuantity, '| Status:', json.data.status);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 20,\n  \"reason\": \"Restock for testing\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/inventory/a1b2c3d4-0000-0000-0000-000000000005/restock",
+              "host": ["{{base_url}}"],
+              "path": ["api","inventory","a1b2c3d4-0000-0000-0000-000000000005","restock"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Happy Path Saga",
+      "item": [
+        {
+          "name": "11. Create Order (WALLET — happy path)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Order created', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('order_id', json.data.id);",
+                  "console.log('Order ID saved:', json.data.id);",
+                  "console.log('Status:', json.data.status, '| Total:', json.data.totalAmount?.amount, json.data.totalAmount?.currency);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customer_id}}\",\n  \"customerEmail\": \"testuser@local.com\",\n  \"paymentMethod\": \"WALLET\",\n  \"shippingAddress\": \"123 Test Street, Bengaluru, KA 560001\",\n  \"items\": [\n    {\n      \"productId\": \"a1b2c3d4-0000-0000-0000-000000000001\",\n      \"productName\": \"Wireless Mouse\",\n      \"sku\": \"MOUSE-WL-001\",\n      \"quantity\": 2,\n      \"unitPrice\": 799.00,\n      \"currency\": \"INR\"\n    },\n    {\n      \"productId\": \"a1b2c3d4-0000-0000-0000-000000000002\",\n      \"productName\": \"Mechanical Keyboard\",\n      \"sku\": \"KB-MECH-001\",\n      \"quantity\": 1,\n      \"unitPrice\": 2499.00,\n      \"currency\": \"INR\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/orders",
+              "host": ["{{base_url}}"],
+              "path": ["api","orders"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "12. Poll Order Status (run every 5s until COMPLETED)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Order found', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Order status:', json.data.status);",
+                  "// Expected progression: PENDING → INVENTORY_RESERVED → CONFIRMED",
+                  "// PAYMENT_PROCESSING does not exist — payment is sync inside payment-service"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/orders/{{order_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","orders","{{order_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "13. Get Payment by Order (verify COMPLETED)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Payment found', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Payment COMPLETED', () => pm.expect(json.data.status).to.eql('COMPLETED'));",
+                  "pm.test('WALLET method', () => pm.expect(json.data.paymentMethod).to.eql('WALLET'));",
+                  "console.log('Payment:', json.data.status, '| Method:', json.data.paymentMethod, '| TxnRef:', json.data.transactionReference);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/payments/order/{{order_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","payments","order","{{order_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14. Verify Wallet Debited (balance should be ~5903 INR)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Balance returned', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Balance after order:', json.data.amount, json.data.currency);",
+                  "// Expected: 10000 - 4097 = 5903 INR"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/customer/{{customer_id}}/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","customer","{{customer_id}}","balance"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "15. Get Wallet Ledger (verify DEBIT entry)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Ledger returned', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Ledger entries:', json.data.totalElements);",
+                  "// Should contain: CREDIT (top-up) + DEBIT (order payment)"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/{{wallet_id}}/ledger",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","{{wallet_id}}","ledger"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "16. Verify Inventory Reserved (Mouse — reserved=2, available=98)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Inventory returned', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('2 units reserved', () => pm.expect(json.data.reservedQuantity).to.eql(2));",
+                  "pm.test('98 available', () => pm.expect(json.data.availableQuantity).to.eql(98));",
+                  "console.log('Mouse — available:', json.data.availableQuantity, '| reserved:', json.data.reservedQuantity);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/a1b2c3d4-0000-0000-0000-000000000001",
+              "host": ["{{base_url}}"],
+              "path": ["api","inventory","a1b2c3d4-0000-0000-0000-000000000001"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Compensation — Out of Stock",
+      "item": [
+        {
+          "name": "17. Create Order — Webcam HD (OUT_OF_STOCK, no restock done)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Make sure you have NOT run request 10 (Restock Webcam) before this.",
+                  "// Webcam HD starts at stock=0 from Flyway seed data."
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Order created', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('order_id_oos', json.data.id);",
+                  "console.log('OOS Order ID saved:', json.data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customer_id}}\",\n  \"customerEmail\": \"testuser@local.com\",\n  \"paymentMethod\": \"WALLET\",\n  \"shippingAddress\": \"123 Test Street, Bengaluru, KA 560001\",\n  \"items\": [\n    {\n      \"productId\": \"a1b2c3d4-0000-0000-0000-000000000005\",\n      \"productName\": \"Webcam HD\",\n      \"sku\": \"CAM-HD-001\",\n      \"quantity\": 1,\n      \"unitPrice\": 1899.00,\n      \"currency\": \"INR\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/orders",
+              "host": ["{{base_url}}"],
+              "path": ["api","orders"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "18. Poll OOS Order (expect FAILED — no payment taken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Order found', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('OOS Order status:', json.data.status);",
+                  "// Expected: PENDING → FAILED (inventory.failed, no payment attempted)",
+                  "// Wallet balance should be UNCHANGED — no debit happened"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/orders/{{order_id_oos}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","orders","{{order_id_oos}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19. Verify Wallet Unchanged (OOS — no charge)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Balance returned', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Balance (should be unchanged):', json.data.amount, json.data.currency);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/customer/{{customer_id}}/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","customer","{{customer_id}}","balance"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Compensation — Insufficient Balance",
+      "item": [
+        {
+          "name": "20. Create Order — Amount exceeds wallet balance",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Order total = 99999 INR, wallet balance will be < that.",
+                  "// Expected saga: inventory.reserved → payment.failed (INSUFFICIENT_WALLET_BALANCE) → order.failed"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Order created', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('order_id_insuf', json.data.id);",
+                  "console.log('Insufficient balance order ID:', json.data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"{{customer_id}}\",\n  \"customerEmail\": \"testuser@local.com\",\n  \"paymentMethod\": \"WALLET\",\n  \"shippingAddress\": \"123 Test Street, Bengaluru, KA 560001\",\n  \"items\": [\n    {\n      \"productId\": \"a1b2c3d4-0000-0000-0000-000000000004\",\n      \"productName\": \"Monitor Stand\",\n      \"sku\": \"STAND-MON-001\",\n      \"quantity\": 30,\n      \"unitPrice\": 9999.00,\n      \"currency\": \"INR\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/orders",
+              "host": ["{{base_url}}"],
+              "path": ["api","orders"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "21. Poll Insufficient Balance Order (expect FAILED)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Order found', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Status:', json.data.status);",
+                  "// Expected: PENDING → INVENTORY_RESERVED → FAILED (payment.failed — wallet insufficient)"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/orders/{{order_id_insuf}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","orders","{{order_id_insuf}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cancel & Refund",
+      "item": [
+        {
+          "name": "22. Cancel Order (completed order)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Uses {{order_id}} from happy path saga.",
+                  "// Order must be in CONFIRMED status (final state after happy path).",
+                  "// CONFIRMED orders ARE cancellable — triggers full wallet refund (4097 INR back).",
+                  "// Only CANCELLED and FAILED orders are blocked from cancellation."
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cancel accepted', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Status is CANCELLED', () => pm.expect(json.data.status).to.eql('CANCELLED'));",
+                  "console.log('Order cancelled. previousStatus was CONFIRMED — wallet refund of 4097 INR in flight via order.cancelled event.');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/orders/{{order_id}}/cancel?reason=Customer+requested+cancellation",
+              "host": ["{{base_url}}"],
+              "path": ["api","orders","{{order_id}}","cancel"],
+              "query": [{ "key": "reason", "value": "Customer requested cancellation" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "23. Cancel PENDING Order (cancel before saga starts)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Step 1: POST /api/orders to create a fresh order, save the ID manually or via test script.",
+                  "// Step 2: Immediately run this request within 5 seconds (before outbox poller fires).",
+                  "// Uses {{order_id}} — replace with a freshly created pending order ID."
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cancel accepted', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Status is CANCELLED', () => pm.expect(json.data.status).to.eql('CANCELLED'));",
+                  "console.log('PENDING order cancelled — no wallet debit had occurred, no refund triggered.');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/orders/{{order_id}}/cancel?reason=Changed+my+mind",
+              "host": ["{{base_url}}"],
+              "path": ["api","orders","{{order_id}}","cancel"],
+              "query": [{ "key": "reason", "value": "Changed my mind" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "24. Verify Wallet Refunded",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Balance returned', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Balance after cancellation:', json.data.amount, json.data.currency);",
+                  "// If CONFIRMED order was cancelled → balance should be restored to ~10000 INR (refund async via Kafka)",
+                  "// If PENDING order was cancelled → balance unchanged (no debit had occurred)",
+                  "// Allow ~10s for order.cancelled event → wallet-service refund to process"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/customer/{{customer_id}}/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","customer","{{customer_id}}","balance"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "25. Get Wallet Ledger (verify REFUND entry)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Ledger returned', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "console.log('Total ledger entries:', json.data.totalElements);",
+                  "// Should contain: CREDIT (top-up) + DEBIT (order) + REFUND (cancellation)"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/{{wallet_id}}/ledger",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","{{wallet_id}}","ledger"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "26. Restock Monitor Stand",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 50,\n  \"reason\": \"Monthly supplier delivery\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/inventory/a1b2c3d4-0000-0000-0000-000000000004/restock",
+              "host": ["{{base_url}}"],
+              "path": ["api","inventory","a1b2c3d4-0000-0000-0000-000000000004","restock"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "27. Get Low Stock (threshold=30)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/low-stock?threshold=30",
+              "host": ["{{base_url}}"],
+              "path": ["api","inventory","low-stock"],
+              "query": [{ "key": "threshold", "value": "30" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "28. Rebuild Wallet Balance",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/wallets/{{wallet_id}}/rebuild",
+              "host": ["{{base_url}}"],
+              "path": ["api","wallets","{{wallet_id}}","rebuild"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "base_url",     "value": "http://localhost:8080" },
+    { "key": "keycloak_url", "value": "http://localhost:8180" },
+    { "key": "realm",        "value": "payment-platform" },
+    { "key": "client_id",    "value": "payment-client" },
+    { "key": "username",     "value": "testuser" },
+    { "key": "password",     "value": "password" },
+    { "key": "customer_id",  "value": "customer-001" }
+  ]
+}

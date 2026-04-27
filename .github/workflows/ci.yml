@@ -83,11 +83,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-# ── OWASP SECURITY SCAN ──────────────────────────────────────────────
+# ── OWASP SECURITY SCAN (FAST PATH) ──────────────────────────────────
   security:
-    name: OWASP Dependency-Check
+    name: OWASP Dependency-Check (warm cache only)
     runs-on: ubuntu-latest
     needs: build
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -100,36 +101,56 @@ jobs:
           distribution: temurin
           cache: maven
 
-      - name: Current ISO week
+      - name: Current UTC day
         id: date
-        run: echo "week=$(date +'%Y-W%V')" >> $GITHUB_OUTPUT
+        run: echo "day=$(date -u +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
-      - name: Cache NVD database
+      - name: Restore NVD database cache
         id: nvd-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.owasp-dependency-check  # matches dataDirectory in pom.xml
-          key: owasp-nvd-${{ runner.os }}-${{ steps.date.outputs.week }}
-          restore-keys: owasp-nvd-${{ runner.os }}-
+          key: owasp-nvd-${{ runner.os }}-${{ steps.date.outputs.day }}
+          restore-keys: |
+            owasp-nvd-${{ runner.os }}-
 
-      - name: Run OWASP Dependency-Check
-        # cache-hit → skip NVD update, data already fresh this week
-        # cache-miss → pull latest CVEs from NVD (once per week)
-        # enableMemorySegments=false → silences Lucene vector incubator warning on Java 21
-        # suppressionFiles → wires the checked-in suppression list so false-positives
-        #   and shaded-artifact CVEs do not fail the build
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+      - name: Fail fast when deploy path has no fresh NVD cache
+        if: |
+          (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')) &&
+          steps.nvd-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "::error::No fresh same-day OWASP NVD cache was available for this deploy-path run."
+          echo "::error::Run the scheduled 'Security Refresh' workflow, or trigger it manually, before re-running this pipeline."
+          exit 1
+
+      - name: Skip cold-start sync on non-deploy paths
+        if: |
+          github.ref != 'refs/heads/master' &&
+          !startsWith(github.ref, 'refs/tags/v') &&
+          steps.nvd-cache.outputs.cache-hit == ''
+        run: |
+          echo "### OWASP scan skipped" >> "$GITHUB_STEP_SUMMARY"
+          echo "- No warmed NVD cache was available." >> "$GITHUB_STEP_SUMMARY"
+          echo "- CI stayed on the fast path instead of triggering a cold NVD download." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Use the scheduled or manual 'Security Refresh' workflow to repopulate the cache." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Warn when using a stale restored NVD cache
+        if: |
+          github.ref != 'refs/heads/master' &&
+          !startsWith(github.ref, 'refs/tags/v') &&
+          steps.nvd-cache.outputs.cache-hit == 'false'
+        run: |
+          echo "### OWASP cache status" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dependency-Check used the latest restored cache, but it was not an exact same-day match." >> "$GITHUB_STEP_SUMMARY"
+          echo "- The fast path stayed warm and avoided a live NVD refresh during CI." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run warm-cache OWASP Dependency-Check
+        if: steps.nvd-cache.outputs.cache-hit != ''
         run: |
           mvn dependency-check:aggregate --batch-mode -DskipTests \
-            -DnvdApiKey="$NVD_API_KEY" \
+            -DautoUpdate=false \
             -Dorg.apache.lucene.store.MMapDirectory.enableMemorySegments=false \
-            -DsuppressionFiles=".owasp-suppressions.xml" \
-            ${{ steps.nvd-cache.outputs.cache-hit == 'true' && '-DautoUpdate=false' || '' }}
-        # continue-on-error removed: with CVE pins + suppressions in place the
-        # scan should pass cleanly.  Uncomment if a net-new CVE is published
-        # mid-sprint and you need to merge anyway:
-        # continue-on-error: true
+            -DsuppressionFiles=".owasp-suppressions.xml"
 
       - name: Upload OWASP report
         if: always()
@@ -138,6 +159,7 @@ jobs:
           name: owasp-report
           path: target/dependency-check-report.html
           retention-days: 14
+          if-no-files-found: ignore
 
 # ── DOCKER BUILD + TRIVY + ECR PUSH ───────────────────────────────────
   docker:

@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nemoclaw-config
+  namespace: payment-platform
+data:
+  mempalace.yaml: |
+    wing: order_payment_pipeline
+    policies:
+      - name: OOM_PREVENTION
+        description: Increase memory limit if service is consistently above 85% usage
+        condition: "container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.85"
+        action: "patch_deployment_memory(increment=32Mi, max_limit=384Mi)"
+      - name: LATENCY_SAFEGUARD
+        description: Stop load test or alert if api-gateway p95 latency > 500ms
+        condition: "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job='api-gateway'}[1m])) by (le)) > 0.5"
+        action: "alert_user('Critical latency spike detected in API Gateway')"
+    rooms:
+      - name: notification_service
+        description: Files from notification-service/
+      - name: api_gateway
+        description: Files from api-gateway/
+      - name: configuration
+        description: Files from config/
+      - name: payment_service
+        description: Files from payment-service/
+      - name: k8s
+        description: Files from k8s/
+      - name: wallet_service
+        description: Files from wallet-service/
+      - name: order_service
+        description: Files from order-service/
+      - name: scripts
+        description: Files from scripts/
+      - name: common_lib
+        description: Files from common-lib/
+      - name: inventory_service
+        description: Files from inventory-service/
+      - name: general
+        description: Files that don't fit other rooms

@@ -11,7 +11,7 @@
 - Existing unit tests remain green across all modules via:
   - `mvn test`
 - Parent build now includes `maven-failsafe-plugin` to support `*IT` integration tests.
-- OWASP Dependency-Check now runs as a warm-cache-only fast path in normal CI.
+- OWASP Dependency-Check now runs as a warm-cache-preferred fast path in normal CI.
 - Full NVD refresh and cache seeding are owned by the `Security Refresh` GitHub Actions workflow (scheduled, manual, and targeted `master` push triggers).
 - Integration tests currently present (not part of `mvn test`):
   - `order-service/src/test/java/com/paymentplatform/orderservice/integration/OrderServiceIT.java`
@@ -39,13 +39,13 @@
 - Treat the current dirty tree as in-progress user-authoritative state.
 - `mvn test` must stay green while expanding S18 coverage.
 - Integration tests require Docker for execution; do not assume they will auto-skip when Docker is unavailable.
-- Do not reintroduce a live NVD download into the normal CI hot path.
+- Do not reintroduce a live NVD download into the normal branch/PR CI hot path.
 
 ## Known Environment Notes
 - On this machine/session, `docker ps` reported daemon unavailable at:
   - 2026-04-27 (Asia/Kolkata)
 - Current CI security behavior with this repo state:
-  - Deploy-path CI expects a fresh warmed NVD cache from `Security Refresh`.
+  - Deploy-path CI prefers a fresh warmed NVD cache from `Security Refresh`, but can bootstrap NVD inline when the cache is missing or stale.
   - Branch/PR CI avoids live NVD downloads and will skip the OWASP scan when no warmed cache is available.
 
 ## Next Rational Steps

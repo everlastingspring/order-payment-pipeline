@@ -83,7 +83,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-# ── OWASP SECURITY SCAN (FAST PATH) ──────────────────────────────────
+# ── OWASP SECURITY SCAN ──────────────────────────────────────────────
   security:
     name: OWASP Dependency-Check (warm cache preferred)
     runs-on: ubuntu-latest
@@ -150,7 +150,7 @@ jobs:
           echo "### OWASP scan skipped" >> "$GITHUB_STEP_SUMMARY"
           echo "- No warmed NVD cache was available." >> "$GITHUB_STEP_SUMMARY"
           echo "- CI stayed on the fast path instead of triggering a cold NVD download." >> "$GITHUB_STEP_SUMMARY"
-          echo "- Use the scheduled or manual 'Security Refresh' workflow to repopulate the cache." >> "$GITHUB_STEP_SUMMARY"
+          echo "- A deploy-path run on master or a release tag will refresh the cache inline." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Warn when using a stale restored NVD cache
         if: |

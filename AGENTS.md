@@ -12,7 +12,7 @@
   - `mvn test`
 - Parent build now includes `maven-failsafe-plugin` to support `*IT` integration tests.
 - OWASP Dependency-Check now runs as a warm-cache-preferred fast path in normal CI.
-- Full NVD refresh and cache seeding are owned by the `Security Refresh` GitHub Actions workflow (scheduled, manual, and targeted `master` push triggers).
+- Deploy-path CI refreshes and seeds the NVD cache inline when needed.
 - Integration tests currently present (not part of `mvn test`):
   - `order-service/src/test/java/com/paymentplatform/orderservice/integration/OrderServiceIT.java`
   - `payment-service/src/test/java/com/paymentplatform/paymentservice/integration/PaymentServiceIT.java`
@@ -32,7 +32,7 @@
 - Run only ITs for current slice:
   - `mvn -pl wallet-service,inventory-service -am verify -DskipTests -DskipITs=false`
 - Refresh the NVD cache and publish the full OWASP report:
-  - Trigger `.github/workflows/security-refresh.yml` manually in GitHub Actions, wait for the scheduled run, or merge OWASP workflow/config changes to `master`.
+  - Re-run the `master` or release-tag CI workflow; deploy-path CI will refresh the NVD cache inline when needed.
 
 ## Important Constraints
 - Do not revert existing unstaged/staged user work.
@@ -45,7 +45,7 @@
 - On this machine/session, `docker ps` reported daemon unavailable at:
   - 2026-04-27 (Asia/Kolkata)
 - Current CI security behavior with this repo state:
-  - Deploy-path CI prefers a fresh warmed NVD cache from `Security Refresh`, but can bootstrap NVD inline when the cache is missing or stale.
+  - Deploy-path CI bootstraps NVD inline when the cache is missing or stale.
   - Branch/PR CI avoids live NVD downloads and will skip the OWASP scan when no warmed cache is available.
 
 ## Next Rational Steps

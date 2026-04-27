@@ -1,0 +1,64 @@
+wing: order_payment_pipeline
+policies:
+  - name: OOM_PREVENTION
+    description: Increase memory limit if service is consistently above 85% usage
+    condition: "container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.85"
+    action: "patch_deployment_memory(increment=32Mi, max_limit=384Mi)"
+  - name: LATENCY_SAFEGUARD
+    description: Stop load test or alert if api-gateway p95 latency > 500ms
+    condition: "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job='api-gateway'}[1m])) by (le)) > 0.5"
+    action: "alert_user('Critical latency spike detected in API Gateway')"
+rooms:
+- name: notification_service
+  description: Files from notification-service/
+  keywords:
+  - notification_service
+  - notification-service
+- name: api_gateway
+  description: Files from api-gateway/
+  keywords:
+  - api_gateway
+  - api-gateway
+- name: configuration
+  description: Files from config/
+  keywords:
+  - configuration
+  - config
+- name: payment_service
+  description: Files from payment-service/
+  keywords:
+  - payment_service
+  - payment-service
+- name: k8s
+  description: Files from k8s/
+  keywords:
+  - k8s
+  - k8s
+- name: wallet_service
+  description: Files from wallet-service/
+  keywords:
+  - wallet_service
+  - wallet-service
+- name: order_service
+  description: Files from order-service/
+  keywords:
+  - order_service
+  - order-service
+- name: scripts
+  description: Files from scripts/
+  keywords:
+  - scripts
+  - scripts
+- name: common_lib
+  description: Files from common-lib/
+  keywords:
+  - common_lib
+  - common-lib
+- name: inventory_service
+  description: Files from inventory-service/
+  keywords:
+  - inventory_service
+  - inventory-service
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []

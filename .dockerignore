@@ -1,0 +1,38 @@
+# Root .dockerignore — applies when build context is the project root (.)
+# Keeps all pom.xml and src/ trees; excludes files that bloat the context
+# or leak credentials without affecting the Maven build inside Docker.
+
+# Git internals
+.git/
+.gitignore
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# Local Maven output — Docker build runs Maven fresh inside the container
+**/target/
+
+# Docker files themselves (not needed inside the image)
+**/Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation and local scripts
+*.md
+scripts/
+
+# Config files only needed at runtime via docker compose env / volumes
+config/
+
+# CI / tooling
+.github/
+.owasp-suppressions.xml
+sonar-project.properties
+
+# Infra / k8s — not needed for Java build
+infra/
+k8s/

@@ -1,0 +1,47 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "docker-infra",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "-d"],
+      "port": 5432
+    },
+    {
+      "name": "api-gateway",
+      "runtimeExecutable": "mvn",
+      "runtimeArgs": ["spring-boot:run", "-pl", "api-gateway"],
+      "port": 8080
+    },
+    {
+      "name": "order-service",
+      "runtimeExecutable": "mvn",
+      "runtimeArgs": ["spring-boot:run", "-pl", "order-service"],
+      "port": 8081
+    },
+    {
+      "name": "payment-service",
+      "runtimeExecutable": "mvn",
+      "runtimeArgs": ["spring-boot:run", "-pl", "payment-service"],
+      "port": 8082
+    },
+    {
+      "name": "inventory-service",
+      "runtimeExecutable": "mvn",
+      "runtimeArgs": ["spring-boot:run", "-pl", "inventory-service"],
+      "port": 8083
+    },
+    {
+      "name": "notification-service",
+      "runtimeExecutable": "mvn",
+      "runtimeArgs": ["spring-boot:run", "-pl", "notification-service"],
+      "port": 8084
+    },
+    {
+      "name": "wallet-service",
+      "runtimeExecutable": "mvn",
+      "runtimeArgs": ["spring-boot:run", "-pl", "wallet-service"],
+      "port": 8085
+    }
+  ]
+}

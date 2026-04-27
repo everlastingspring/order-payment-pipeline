@@ -13,3 +13,7 @@ target/
 *.tfstate.backup
 .terraform.lock.hcl
 
+# OWASP Dependency-Check generated reports
+dependency-check-report*.html
+dependency-check-report*.json
+dependency-check-report*.xml

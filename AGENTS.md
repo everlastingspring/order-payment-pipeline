@@ -12,7 +12,7 @@
   - `mvn test`
 - Parent build now includes `maven-failsafe-plugin` to support `*IT` integration tests.
 - OWASP Dependency-Check now runs as a warm-cache-only fast path in normal CI.
-- Full NVD refresh and cache seeding are owned by the scheduled/manual `Security Refresh` GitHub Actions workflow.
+- Full NVD refresh and cache seeding are owned by the `Security Refresh` GitHub Actions workflow (scheduled, manual, and targeted `master` push triggers).
 - Integration tests currently present (not part of `mvn test`):
   - `order-service/src/test/java/com/paymentplatform/orderservice/integration/OrderServiceIT.java`
   - `payment-service/src/test/java/com/paymentplatform/paymentservice/integration/PaymentServiceIT.java`
@@ -32,7 +32,7 @@
 - Run only ITs for current slice:
   - `mvn -pl wallet-service,inventory-service -am verify -DskipTests -DskipITs=false`
 - Refresh the NVD cache and publish the full OWASP report:
-  - Trigger `.github/workflows/security-refresh.yml` manually in GitHub Actions, or wait for the scheduled run.
+  - Trigger `.github/workflows/security-refresh.yml` manually in GitHub Actions, wait for the scheduled run, or merge OWASP workflow/config changes to `master`.
 
 ## Important Constraints
 - Do not revert existing unstaged/staged user work.

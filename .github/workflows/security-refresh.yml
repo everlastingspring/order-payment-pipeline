@@ -1,6 +1,13 @@
 name: Security Refresh
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/security-refresh.yml'
+      - 'pom.xml'
+      - '.owasp-suppressions.xml'
   schedule:
     - cron: '12 0 * * *'
     - cron: '17 1 * * *'

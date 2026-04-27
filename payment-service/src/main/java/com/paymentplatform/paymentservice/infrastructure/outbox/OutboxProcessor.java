@@ -17,25 +17,44 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Polls the outbox_events table for PENDING events and publishes
- * them to Kafka. Runs every 500ms.
+ * Scheduled processor that polls {@code PENDING} outbox rows in payment-service and publishes
+ * them to Kafka.
  *
- * Guarantees:
- *  - At-least-once delivery (retries on failure)
- *  - Ordering per aggregate (events polled by created_at ASC)
- *  - Poison pill protection (moves to FAILED after 5 retries)
- *  - Circuit breaker: stops hammering Kafka when broker is down
+ * <p><strong>Guarantees:</strong></p>
+ * <ul>
+ *   <li>At-least-once delivery — failed publishes are retried up to {@code MAX_RETRIES} times.</li>
+ *   <li>Ordering per aggregate — events are polled {@code ORDER BY created_at ASC} so that
+ *       {@code payment.completed} is never delivered before {@code payment.failed} for the same payment.</li>
+ *   <li>Poison pill protection — events that exhaust retries are permanently marked {@code FAILED}.</li>
+ *   <li>Circuit breaker — stops polling when Kafka is consistently unavailable.</li>
+ * </ul>
+ *
+ * <p><strong>Events published by payment-service:</strong></p>
+ * <ul>
+ *   <li>{@code payment.completed} — consumed by order-service (CONFIRMED), notification-service, wallet-service</li>
+ *   <li>{@code payment.failed} — consumed by order-service (FAILED + order.failed → inventory release)</li>
+ * </ul>
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class OutboxProcessor {
 
+    /** Repository for reading PENDING events and persisting status updates. */
     private final OutboxEventRepository outboxEventRepository;
+
+    /** Wraps {@code KafkaTemplate.send()} with logging and future handling. */
     private final KafkaEventPublisher kafkaEventPublisher;
 
+    /**
+     * Maximum publish attempts before an event is permanently marked FAILED.
+     */
     private static final int MAX_RETRIES = 5;
 
+    /**
+     * Main poll cycle — fetches up to 50 PENDING events and publishes each one.
+     * Runs every {@code outbox.processor.poll-interval-ms} milliseconds (default 5000).
+     */
     @Scheduled(fixedDelayString = "${outbox.processor.poll-interval-ms:5000}")
     @Transactional
     @CircuitBreaker(name = "kafkaPublisher", fallbackMethod = "processOutboxFallback")

@@ -15,22 +15,44 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.UUID;
 
 /**
- * Sequential choreography saga for the order lifecycle.
+ * Choreography saga coordinator for the order lifecycle in order-service.
  *
- * Step 1: order.created    → inventory-service reserves stock → inventory.reserved
- * Step 2: inventory.reserved → payment-service charges       → payment.completed / payment.failed
- * Step 3: payment.completed → this manager → order CONFIRMED  → order.completed
+ * <p><strong>Happy path:</strong></p>
+ * <pre>
+ *   order.created (published by OrderService)
+ *       → inventory.reserved (inventory-service)
+ *           → [handleInventoryReserved] order → INVENTORY_RESERVED
+ *       → payment.completed (payment-service)
+ *           → [handlePaymentCompleted] order → CONFIRMED → order.completed published
+ * </pre>
  *
- * Failure paths:
- *   inventory.failed  → order FAILED (no payment was attempted)
- *   payment.failed    → order FAILED → order.failed (inventory-service releases stock)
+ * <p><strong>Failure paths:</strong></p>
+ * <pre>
+ *   inventory.failed
+ *       → [handleInventoryFailed] order → FAILED → order.failed published (failedStep=INVENTORY)
+ *         (no stock was reserved, so inventory-service ignores the order.failed)
+ *
+ *   payment.failed
+ *       → [handlePaymentFailed] order → FAILED → order.failed published (failedStep=PAYMENT)
+ *         (inventory-service consumes order.failed, releases reserved stock)
+ * </pre>
+ *
+ * <p><strong>Idempotency:</strong> All handlers guard against processing events for orders already
+ * in a final state (CONFIRMED, COMPLETED, CANCELLED, FAILED) via {@link #isFinalState(OrderStatus)}.
+ * This is necessary because Kafka delivers at-least-once and retries can replay events.</p>
+ *
+ * <p>This class handles saga state transitions only. All outbox event publishing is delegated
+ * to {@link OrderService} to keep the saga manager focused on state machine logic.</p>
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class OrderSagaManager {
 
+    /** Direct DB access for loading orders by UUID (no service layer in saga reads). */
     private final OrderRepository orderRepository;
+
+    /** Delegated to for outbox event publishing ({@code publishOrderCompleted}, {@code publishOrderFailed}). */
     private final OrderService orderService;
 
     /**
@@ -131,6 +153,13 @@ public class OrderSagaManager {
                 "Payment declined: " + event.getFailureReason(), "PAYMENT");
     }
 
+    /**
+     * Returns {@code true} if the order is in a terminal state where no further saga transitions
+     * should occur. Guards all handlers against processing late/replayed Kafka events.
+     *
+     * @param status the current order status
+     * @return {@code true} for CONFIRMED, COMPLETED, CANCELLED, FAILED
+     */
     private boolean isFinalState(OrderStatus status) {
         return status == OrderStatus.CONFIRMED
                 || status == OrderStatus.COMPLETED
@@ -138,6 +167,12 @@ public class OrderSagaManager {
                 || status == OrderStatus.FAILED;
     }
 
+    /**
+     * Loads an order by its string UUID, throwing {@code ResourceNotFoundException} if absent.
+     *
+     * @param orderId the order UUID as a string (as carried in Kafka event payloads)
+     * @return the {@link Order} entity
+     */
     private Order findOrder(String orderId) {
         return orderRepository.findById(UUID.fromString(orderId))
                 .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));

@@ -16,14 +16,41 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Scheduled processor that polls {@code PENDING} outbox rows in order-service and publishes
+ * them to Kafka.
+ *
+ * <p><strong>Poll cycle (default 5 s):</strong> Fetches up to 50 {@code PENDING} events ordered
+ * by {@code createdAt ASC}. For each event, calls {@link KafkaEventPublisher#publish} and blocks
+ * on the {@code CompletableFuture}. On success → {@code PUBLISHED}. On failure →
+ * {@code markFailed()} and then {@code retry()} (back to {@code PENDING}) until
+ * {@code MAX_RETRY_COUNT} (5) is reached, at which point the event stays {@code FAILED}.</p>
+ *
+ * <p><strong>Events published by order-service:</strong></p>
+ * <ul>
+ *   <li>{@code order.created} — saga entry point; consumed by inventory-service and notification-service</li>
+ *   <li>{@code order.completed} — consumed by notification-service</li>
+ *   <li>{@code order.failed} — consumed by inventory-service (release stock) and notification-service</li>
+ *   <li>{@code order.cancelled} — consumed by inventory-service, notification-service, wallet-service</li>
+ * </ul>
+ *
+ * <p><strong>Circuit breaker:</strong> The {@code kafkaPublisher} circuit breaker prevents
+ * repeated Kafka attempts when the broker is consistently unavailable.</p>
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class OutboxProcessor {
 
+    /**
+     * Maximum consecutive publish failures before an event is permanently marked FAILED.
+     */
     private static final int MAX_RETRY_COUNT = 5;
 
+    /** Repository for reading PENDING events and updating status after publish. */
     private final OutboxEventRepository outboxEventRepository;
+
+    /** Wraps {@code KafkaTemplate.send()} for structured logging and future handling. */
     private final KafkaEventPublisher kafkaEventPublisher;
 
     /**

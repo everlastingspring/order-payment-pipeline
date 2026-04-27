@@ -13,6 +13,14 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
+/**
+ * REST controller exposing payment query endpoints.
+ *
+ * <p>Payments are created automatically by the saga (triggered by {@code inventory.reserved}).
+ * There is no {@code POST /payments} endpoint — payment initiation is event-driven, not HTTP.</p>
+ *
+ * <p>Base path: {@code /api/payments}</p>
+ */
 @RestController
 @RequestMapping("/api/payments")
 @RequiredArgsConstructor
@@ -20,6 +28,12 @@ public class PaymentController {
 
     private final PaymentService paymentService;
 
+    /**
+     * Retrieves a payment by its UUID.
+     *
+     * @param paymentId UUID of the payment record
+     * @return 200 OK with the payment DTO, or 404 if not found
+     */
     @GetMapping("/{paymentId}")
     public ResponseEntity<ApiResponse<PaymentDto>> getPayment(@PathVariable UUID paymentId) {
         PaymentDto payment = paymentService.getPayment(paymentId);
@@ -30,6 +44,13 @@ public class PaymentController {
                 .build());
     }
 
+    /**
+     * Retrieves the payment associated with a specific order.
+     * Useful for the Postman smoke test to confirm the saga completed.
+     *
+     * @param orderId UUID of the order (as String)
+     * @return 200 OK with the payment DTO, or 404 if not found
+     */
     @GetMapping("/order/{orderId}")
     public ResponseEntity<ApiResponse<PaymentDto>> getPaymentByOrder(@PathVariable String orderId) {
         PaymentDto payment = paymentService.getPaymentByOrderId(orderId);
@@ -40,6 +61,14 @@ public class PaymentController {
                 .build());
     }
 
+    /**
+     * Returns a paginated payment history for a customer, sorted newest first.
+     *
+     * @param customerId customer identifier
+     * @param page       zero-based page number (default 0)
+     * @param size       page size (default 20)
+     * @return 200 OK with paged payment DTOs
+     */
     @GetMapping("/customer/{customerId}")
     public ResponseEntity<ApiResponse<PagedResponse<PaymentDto>>> getPaymentsByCustomer(
             @PathVariable String customerId,

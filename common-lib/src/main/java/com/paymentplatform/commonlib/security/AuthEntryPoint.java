@@ -29,10 +29,23 @@ public class AuthEntryPoint implements AuthenticationEntryPoint {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * @param objectMapper Spring-managed Jackson mapper (must include {@code JavaTimeModule}
+     *                     for {@code Instant} serialisation in {@link ErrorResponse})
+     */
     public AuthEntryPoint(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Writes a 401 {@link ErrorResponse} JSON body. Called by Spring Security
+     * when an unauthenticated request reaches a protected endpoint.
+     *
+     * @param request       the incoming HTTP request
+     * @param response      the HTTP response to write the 401 body to
+     * @param authException the exception that triggered the 401 (message not exposed to client)
+     * @throws IOException if writing to the response output stream fails
+     */
     @Override
     public void commence(HttpServletRequest request,
                          HttpServletResponse response,

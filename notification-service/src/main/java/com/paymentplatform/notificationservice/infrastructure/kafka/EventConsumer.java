@@ -12,17 +12,44 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 /**
- * Consumes all order/payment lifecycle events and delegates
- * to NotificationService to create and send notifications.
+ * Kafka consumer for all order and payment lifecycle events that produce customer notifications.
+ *
+ * <p><strong>Topics consumed:</strong></p>
+ * <table border="1">
+ *   <tr><th>Topic</th><th>Notification type</th></tr>
+ *   <tr><td>{@code order.created}</td><td>ORDER_CONFIRMATION — "Your order has been received"</td></tr>
+ *   <tr><td>{@code payment.completed}</td><td>PAYMENT_SUCCESS — "Payment successful"</td></tr>
+ *   <tr><td>{@code payment.failed}</td><td>PAYMENT_FAILURE — "Payment failed"</td></tr>
+ *   <tr><td>{@code order.completed}</td><td>ORDER_CONFIRMATION — "Order confirmed"</td></tr>
+ *   <tr><td>{@code order.cancelled}</td><td>ORDER_CANCELLED — "Order cancelled"</td></tr>
+ *   <tr><td>{@code order.failed}</td><td>ORDER_FAILED — "Order could not be completed"</td></tr>
+ * </table>
+ *
+ * <p>For each event, this class builds a human-readable subject and body string, then delegates
+ * to {@link com.paymentplatform.notificationservice.application.service.NotificationService#sendNotification}.
+ * Business logic (deduplication, retry, DLQ) lives in the service — this class only handles
+ * JSON deserialisation and message construction.</p>
+ *
+ * <p>Manual acknowledgment ({@code AckMode.MANUAL_IMMEDIATE}) is used. Ack is sent only on success;
+ * on failure a {@code RuntimeException} is thrown to let Resilience4j retry handle redelivery.</p>
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class EventConsumer {
 
+    /** Service that creates notification records, routes to channels, and handles retry/DLQ. */
     private final NotificationService notificationService;
+
+    /** Deserialises the raw Kafka JSON payload into typed event objects. */
     private final ObjectMapper objectMapper;
 
+    /**
+     * Handles {@code order.created} — sends an "Order Received" confirmation to the customer.
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle; ack'd only on success
+     */
     @KafkaListener(
             topics = KafkaTopics.ORDER_CREATED,
             groupId = "notification-service-group",
@@ -49,6 +76,12 @@ public class EventConsumer {
         }
     }
 
+    /**
+     * Handles {@code payment.completed} — sends a "Payment Successful" alert via email and SMS.
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle
+     */
     @KafkaListener(
             topics = KafkaTopics.PAYMENT_COMPLETED,
             groupId = "notification-service-group",
@@ -75,6 +108,12 @@ public class EventConsumer {
         }
     }
 
+    /**
+     * Handles {@code payment.failed} — sends a "Payment Failed" alert via email and SMS.
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle
+     */
     @KafkaListener(
             topics = KafkaTopics.PAYMENT_FAILED,
             groupId = "notification-service-group",
@@ -101,6 +140,12 @@ public class EventConsumer {
         }
     }
 
+    /**
+     * Handles {@code order.completed} — sends an "Order Confirmed" notification via email.
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle
+     */
     @KafkaListener(
             topics = KafkaTopics.ORDER_COMPLETED,
             groupId = "notification-service-group",
@@ -127,6 +172,12 @@ public class EventConsumer {
         }
     }
 
+    /**
+     * Handles {@code order.cancelled} — sends an "Order Cancelled" notification via email.
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle
+     */
     @KafkaListener(
             topics = KafkaTopics.ORDER_CANCELLED,
             groupId = "notification-service-group",
@@ -153,6 +204,13 @@ public class EventConsumer {
         }
     }
 
+    /**
+     * Handles {@code order.failed} — sends an "Order Failed" notification via email.
+     * The body informs the customer that no payment was charged.
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle
+     */
     @KafkaListener(
             topics = KafkaTopics.ORDER_FAILED,
             groupId = "notification-service-group",

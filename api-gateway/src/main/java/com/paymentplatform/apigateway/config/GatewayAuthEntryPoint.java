@@ -29,12 +29,25 @@ import java.time.Instant;
  */
 public class GatewayAuthEntryPoint implements ServerAuthenticationEntryPoint {
 
+    /** Spring-managed Jackson mapper used to serialise the {@link ErrorResponse} body. */
     private final ObjectMapper objectMapper;
 
+    /**
+     * @param objectMapper Spring-managed Jackson mapper (must include {@code JavaTimeModule}
+     *                     for {@code Instant} serialisation in {@link ErrorResponse})
+     */
     public GatewayAuthEntryPoint(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Writes a 401 {@link ErrorResponse} JSON body. Called by Spring Security when an
+     * unauthenticated request reaches a protected route.
+     *
+     * @param exchange the current server web exchange
+     * @param ex       the authentication exception that triggered the 401
+     * @return Mono that completes after writing the response body
+     */
     @Override
     public Mono<Void> commence(ServerWebExchange exchange, AuthenticationException ex) {
         return Mono.defer(() -> {

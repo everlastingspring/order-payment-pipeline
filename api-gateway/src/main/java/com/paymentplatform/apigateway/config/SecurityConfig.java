@@ -8,13 +8,31 @@ import org.springframework.security.config.annotation.web.reactive.EnableWebFlux
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 
+/**
+ * Spring Security WebFlux configuration for api-gateway.
+ *
+ * <p>Two filter chains — one per Spring profile:</p>
+ * <ul>
+ *   <li><b>{@code !prod}:</b> Permits all requests; Keycloak is not required for local dev.
+ *       Rate limiting falls back to the {@code X-User-Id} header or client IP.</li>
+ *   <li><b>{@code prod}:</b> Validates Keycloak JWTs via {@code oauth2ResourceServer}.
+ *       After validation, {@code JwtHeaderRelayFilter} propagates user identity as
+ *       {@code X-User-Id}/{@code X-User-Roles} headers to downstream services
+ *       (gateway-trust model). Custom error handlers return {@code ErrorResponse} JSON
+ *       for 401/403 rather than Spring's default bare HTTP responses.</li>
+ * </ul>
+ *
+ * <p>CSRF is disabled — the gateway is a stateless REST API reverse proxy.</p>
+ */
 @Configuration
 @EnableWebFluxSecurity
 public class SecurityConfig {
 
     /**
-     * Local dev profile: permit all requests, no JWT validation.
-     * Keycloak doesn't need to be running for local development.
+     * Local dev / test filter chain — permits all requests without JWT validation.
+     *
+     * @param http the reactive {@link ServerHttpSecurity} builder
+     * @return permit-all stateless WebFlux filter chain
      */
     @Bean
     @Profile("!prod")
@@ -29,15 +47,13 @@ public class SecurityConfig {
     }
 
     /**
-     * Production profile: require JWT from Keycloak for all API routes.
-     * Actuator endpoints remain open for health probes.
+     * Production filter chain — JWT validation via Keycloak's JWKS endpoint.
+     * {@code JwtHeaderRelayFilter} propagates user identity downstream after validation.
+     * Custom error handlers ensure 401/403 return {@code ErrorResponse} JSON.
      *
-     * After validation, JwtHeaderRelayFilter extracts user identity
-     * and propagates it as X-User-Id / X-User-Roles headers to
-     * downstream services (gateway-trust model).
-     *
-     * Custom exception handlers ensure 401/403 responses return
-     * consistent ErrorResponse JSON (not Spring's default bare response).
+     * @param http         the reactive {@link ServerHttpSecurity} builder
+     * @param objectMapper Spring-managed Jackson mapper for error handler serialisation
+     * @return JWT-secured stateless WebFlux filter chain
      */
     @Bean
     @Profile("prod")

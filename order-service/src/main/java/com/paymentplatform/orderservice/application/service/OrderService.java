@@ -29,16 +29,44 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.UUID;
 
+/**
+ * Application service for order lifecycle management.
+ *
+ * <p>Responsibilities:</p>
+ * <ul>
+ *   <li>Creating orders and saving the {@code order.created} outbox event.</li>
+ *   <li>Cancelling orders with correct refund logic depending on previous status.</li>
+ *   <li>Publishing outbox events for {@code order.cancelled}, {@code order.failed},
+ *       and {@code order.completed} on behalf of the saga manager.</li>
+ * </ul>
+ *
+ * <p>Does NOT advance the order status in response to Kafka events — that is
+ * {@link com.paymentplatform.orderservice.application.saga.OrderSagaManager}'s job.</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class OrderService {
 
+    /** Persistence for {@link com.paymentplatform.orderservice.domain.entity.Order} aggregate roots. */
     private final OrderRepository orderRepository;
+
+    /** Persistence for outbox rows — written in the same transaction as the business change. */
     private final OutboxEventRepository outboxEventRepository;
+
+    /** Converts between {@link com.paymentplatform.orderservice.domain.entity.Order} and {@code OrderDto}. */
     private final OrderMapper orderMapper;
+
+    /** Used to serialise domain events to JSON for the outbox payload column. */
     private final ObjectMapper objectMapper;
 
+    /**
+     * Creates a new order, computes line-item totals, and queues an {@code order.created}
+     * outbox event in the same transaction.
+     *
+     * @param request validated order creation payload
+     * @return the persisted order as a DTO
+     */
     @Transactional
     public OrderDto createOrder(CreateOrderRequest request) {
         Order order = Order.builder()
@@ -94,6 +122,13 @@ public class OrderService {
         return orderMapper.toDto(saved);
     }
 
+    /**
+     * Retrieves a single order by its primary key.
+     *
+     * @param orderId UUID of the order
+     * @return the order DTO
+     * @throws com.paymentplatform.commonlib.exception.ResourceNotFoundException if not found
+     */
     @Transactional(readOnly = true)
     public OrderDto getOrder(UUID orderId) {
         Order order = orderRepository.findById(orderId)
@@ -101,6 +136,13 @@ public class OrderService {
         return orderMapper.toDto(order);
     }
 
+    /**
+     * Returns a page of orders for the given customer, sorted newest first.
+     *
+     * @param customerId the customer identifier
+     * @param pageable   paging and sorting parameters
+     * @return paginated order DTOs
+     */
     @Transactional(readOnly = true)
     public Page<OrderDto> getOrdersByCustomer(String customerId, Pageable pageable) {
         return orderRepository.findByCustomerIdOrderByCreatedAtDesc(customerId, pageable)
@@ -138,6 +180,15 @@ public class OrderService {
         return orderMapper.toDto(saved);
     }
 
+    /**
+     * Serialises an event object to JSON and saves it as a PENDING outbox row.
+     * Must be called within an active transaction so the outbox write is atomic
+     * with the business change that triggered the event.
+     *
+     * @param aggregateId the order UUID string — used as the Kafka message key
+     * @param topic       the Kafka topic name
+     * @param event       the domain event object to serialise
+     */
     private void saveOutboxEvent(String aggregateId, String topic, Object event) {
         try {
             String payload = objectMapper.writeValueAsString(event);
@@ -178,6 +229,14 @@ public class OrderService {
         saveOutboxEvent(order.getId().toString(), KafkaTopics.ORDER_CANCELLED, event);
     }
 
+    /**
+     * Saves an {@code order.failed} outbox event.
+     * Called by {@code OrderSagaManager} when inventory or payment steps fail.
+     *
+     * @param order         the failed order
+     * @param failureReason human-readable failure description
+     * @param failedStep    "INVENTORY" or "PAYMENT" — tells inventory-service whether to release stock
+     */
     public void publishOrderFailed(Order order, String failureReason, String failedStep) {
         var event = OrderFailedEvent.builder()
                 .orderId(order.getId().toString())
@@ -189,6 +248,12 @@ public class OrderService {
         saveOutboxEvent(order.getId().toString(), KafkaTopics.ORDER_FAILED, event);
     }
 
+    /**
+     * Saves an {@code order.completed} outbox event.
+     * Called by {@code OrderSagaManager} when the order is CONFIRMED.
+     *
+     * @param order the confirmed order
+     */
     public void publishOrderCompleted(Order order) {
         var event = com.paymentplatform.commonlib.events.OrderCompletedEvent.builder()
                 .orderId(order.getId().toString())

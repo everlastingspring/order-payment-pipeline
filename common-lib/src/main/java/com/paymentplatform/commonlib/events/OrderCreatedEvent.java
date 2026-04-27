@@ -13,6 +13,19 @@ import lombok.experimental.SuperBuilder;
 import java.time.Instant;
 import java.util.List;
 
+/**
+ * Published to {@code order.created} when a new order is persisted.
+ *
+ * <p>Consumers:</p>
+ * <ul>
+ *   <li><b>inventory-service</b>: reserves stock for each {@link #items} entry.</li>
+ *   <li><b>notification-service</b>: sends an order-confirmation email.</li>
+ * </ul>
+ *
+ * <p>Payment-service does NOT consume this topic — it waits for
+ * {@code inventory.reserved} so that payment is only attempted after
+ * stock is confirmed available (sequential saga).</p>
+ */
 @Data
 @EqualsAndHashCode(callSuper = true)
 @NoArgsConstructor
@@ -20,13 +33,28 @@ import java.util.List;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class OrderCreatedEvent extends BaseEvent {
 
+    /** UUID of the newly created order (matches {@code orders.id} in order_db). */
     private String orderId;
+
+    /** Business-level customer identifier (not a DB UUID — could be an external system ID). */
     private String customerId;
+
+    /** Customer's email address — used by notification-service for confirmations. */
     private String customerEmail;
+
+    /** Sum of all line-item subtotals including currency. */
     private MoneyDto totalAmount;
+
+    /** The payment method selected by the customer at checkout. */
     private PaymentMethod paymentMethod;
+
+    /** Line items included in the order. inventory-service iterates these to reserve stock. */
     private List<OrderItemDto> items;
+
+    /** Delivery address — informational, not used by any downstream service logic. */
     private String shippingAddress;
+
+    /** Timestamp when the order row was persisted in order_db. */
     private Instant createdAt;
 
     public OrderCreatedEvent(String orderId, String customerId, String customerEmail,

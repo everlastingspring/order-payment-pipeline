@@ -35,6 +35,18 @@ import java.util.List;
  */
 public class GatewayAuthFilter extends OncePerRequestFilter {
 
+    /**
+     * Reads {@code X-User-Id} and {@code X-User-Roles} headers set by the API gateway,
+     * builds a {@link UsernamePasswordAuthenticationToken}, and stores it in the
+     * {@link SecurityContextHolder} for the duration of this request.
+     *
+     * <p>If the header is absent or blank (e.g. actuator health probes), the filter passes
+     * through without setting an authentication — the endpoint's own security rules determine
+     * whether the anonymous request is permitted.</p>
+     *
+     * <p>The context is always cleared in a {@code finally} block to prevent leakage across
+     * requests when virtual threads or thread pools are used.</p>
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
@@ -61,6 +73,13 @@ public class GatewayAuthFilter extends OncePerRequestFilter {
         }
     }
 
+    /**
+     * Parses the comma-separated roles header into Spring Security {@link GrantedAuthority} objects.
+     * Prefixes each role with {@code "ROLE_"} so Spring's {@code hasRole("ADMIN")} expressions work.
+     *
+     * @param rolesHeader raw header value (e.g. {@code "ADMIN,USER"}), or null/blank
+     * @return list of authorities, or an empty list if the header is absent
+     */
     private List<GrantedAuthority> parseRoles(String rolesHeader) {
         if (rolesHeader == null || rolesHeader.isBlank()) {
             return Collections.emptyList();

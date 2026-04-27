@@ -25,10 +25,22 @@ public class AuthAccessDeniedHandler implements AccessDeniedHandler {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * @param objectMapper Spring-managed Jackson mapper for {@link ErrorResponse} serialisation
+     */
     public AuthAccessDeniedHandler(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Writes a 403 {@link ErrorResponse} JSON body. Called by Spring Security
+     * when an authenticated user requests a resource they are not authorised to access.
+     *
+     * @param request                the incoming HTTP request
+     * @param response               the HTTP response to write the 403 body to
+     * @param accessDeniedException  the exception that triggered the 403
+     * @throws IOException if writing to the response output stream fails
+     */
     @Override
     public void handle(HttpServletRequest request,
                        HttpServletResponse response,

@@ -30,15 +30,49 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Core application service for inventory-service.
+ *
+ * <p><strong>Responsibilities:</strong></p>
+ * <ul>
+ *   <li>Reserve stock for all items in an order (two-pass: validate → commit).</li>
+ *   <li>Release reserved stock on saga compensation ({@code order.cancelled} / {@code order.failed}).</li>
+ *   <li>Provide read-only inventory views (single product, all products, low-stock report).</li>
+ *   <li>Handle admin restocking via the REST API.</li>
+ *   <li>Write outbox events ({@code inventory.reserved} / {@code inventory.failed}) inside the
+ *       same transaction as the stock mutation — implementing the transactional outbox pattern.</li>
+ * </ul>
+ *
+ * <p><strong>Two-pass reservation:</strong> The first pass checks all items for sufficient stock
+ * without mutating anything. If any item fails, {@code inventory.failed} is published and the method
+ * returns early — no partial reservations. The second pass performs the actual stock deduction and
+ * creates {@link ReservationRecord}s for later compensation. This prevents partial reservation
+ * states that would be hard to compensate.</p>
+ *
+ * <p><strong>What this service does NOT do:</strong></p>
+ * <ul>
+ *   <li>It does not call order-service or payment-service directly — it communicates only via Kafka.</li>
+ *   <li>It does not manage product catalogue (add/remove products) — those are seeded by Flyway.</li>
+ * </ul>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class InventoryService {
 
+    /** Repository for stock-level rows (one per product-warehouse pair). */
     private final InventoryRepository inventoryRepository;
+
+    /** Repository for reservation tracking records used in saga compensation. */
     private final ReservationRecordRepository reservationRecordRepository;
+
+    /** Repository for outbox events that will be polled and published to Kafka. */
     private final OutboxEventRepository outboxEventRepository;
+
+    /** MapStruct mapper that converts {@link Inventory} entities to {@link com.paymentplatform.commonlib.dto.InventoryDto}. */
     private final InventoryMapper inventoryMapper;
+
+    /** Jackson mapper for serialising domain events to JSON for the outbox table. */
     private final ObjectMapper objectMapper;
 
     /**
@@ -157,6 +191,13 @@ public class InventoryService {
 
     // ── Read operations ──
 
+    /**
+     * Returns the inventory record for a single product, including product metadata.
+     *
+     * @param productId UUID of the product
+     * @return {@code InventoryDto} with quantities and status
+     * @throws com.paymentplatform.commonlib.exception.ResourceNotFoundException if no inventory row exists
+     */
     @Transactional(readOnly = true)
     public InventoryDto getInventory(UUID productId) {
         Inventory inventory = inventoryRepository.findByProductIdWithProduct(productId)
@@ -164,6 +205,12 @@ public class InventoryService {
         return inventoryMapper.toDto(inventory);
     }
 
+    /**
+     * Returns inventory for all products in the catalogue.
+     * Used by the {@code GET /api/inventory} endpoint to verify seed data and current stock levels.
+     *
+     * @return list of all inventory DTOs, one per product-warehouse row
+     */
     @Transactional(readOnly = true)
     public List<InventoryDto> getAllInventory() {
         return inventoryRepository.findAllWithProduct().stream()
@@ -263,6 +310,13 @@ public class InventoryService {
                 orderId, releasedCount);
     }
 
+    /**
+     * Writes an {@code inventory.failed} outbox event for a list of items that could not be reserved.
+     * Constructs a human-readable failure reason from each failed item's requested vs available quantities.
+     *
+     * @param orderId the order for which reservation failed
+     * @param items   list of items with product IDs and quantity details
+     */
     private void publishInventoryFailed(String orderId, List<InventoryFailedEvent.FailedItem> items) {
         StringBuilder reason = new StringBuilder("Insufficient stock for products: ");
         items.forEach(item -> reason.append(item.getProductId())
@@ -279,6 +333,15 @@ public class InventoryService {
         saveOutboxEvent(orderId, KafkaTopics.INVENTORY_FAILED, event);
     }
 
+    /**
+     * Serialises an event to JSON and persists it as a {@code PENDING} outbox row in the same
+     * transaction as the business operation that produced it — implementing the outbox pattern.
+     *
+     * @param aggregateId the order ID (used as Kafka message key and aggregate identity)
+     * @param topic       Kafka topic constant from {@link com.paymentplatform.commonlib.constants.KafkaTopics}
+     * @param event       domain event object to serialise (must be Jackson-serialisable)
+     * @throws RuntimeException wrapping {@code JsonProcessingException} if serialisation fails
+     */
     private void saveOutboxEvent(String aggregateId, String topic, Object event) {
         try {
             String payload = objectMapper.writeValueAsString(event);

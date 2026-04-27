@@ -8,8 +8,21 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Spring Data JPA repository for {@link OutboxEvent} entities in payment-service.
+ *
+ * <p>The outbox table is the durable buffer between DB writes and Kafka publishes.
+ * {@code OutboxProcessor} is the sole reader; {@code PaymentService} is the sole writer.</p>
+ */
 @Repository
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> {
 
+    /**
+     * Fetches the next batch of up to 50 {@link OutboxEvent}s in the given status,
+     * ordered oldest-first to preserve per-payment event ordering across the saga.
+     *
+     * @param status the status to filter on (typically {@link OutboxStatus#PENDING})
+     * @return list of at most 50 events ordered by {@code createdAt ASC}
+     */
     List<OutboxEvent> findTop50ByStatusOrderByCreatedAtAsc(OutboxStatus status);
 }

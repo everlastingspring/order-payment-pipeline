@@ -13,16 +13,29 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Producer config for DLQ publishing only.
- * Notification-service is a terminal consumer — it only produces
- * to notification.dlq when retries are exhausted.
+ * Kafka producer infrastructure configuration for notification-service.
+ *
+ * <p>Notification-service is primarily a consumer. The producer here is used exclusively
+ * for DLQ publishing — when a notification exhausts all retry attempts, {@code DlqPublisher}
+ * writes the failed event payload to {@code notification.dlq} for offline investigation.</p>
+ *
+ * <p>Uses the same strong-durability settings as all other services: {@code acks=all},
+ * {@code retries=3}, {@code enable.idempotence=true}, {@code max.in.flight=1}.
+ * OTel observation is enabled for distributed tracing.</p>
  */
 @Configuration
 public class KafkaProducerConfig {
 
+    /** Kafka bootstrap servers from {@code spring.kafka.bootstrap-servers} in application.yml. */
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
+    /**
+     * Creates the producer factory with idempotent, strongly-durable settings.
+     * Used only for DLQ message publishing.
+     *
+     * @return configured {@link ProducerFactory}
+     */
     @Bean
     public ProducerFactory<String, String> producerFactory() {
         Map<String, Object> props = new HashMap<>();
@@ -36,6 +49,11 @@ public class KafkaProducerConfig {
         return new DefaultKafkaProducerFactory<>(props);
     }
 
+    /**
+     * Creates the {@link KafkaTemplate} used by {@code DlqPublisher} with OTel observation.
+     *
+     * @return {@link KafkaTemplate} with tracing support enabled
+     */
     @Bean
     public KafkaTemplate<String, String> kafkaTemplate() {
         KafkaTemplate<String, String> template = new KafkaTemplate<>(producerFactory());

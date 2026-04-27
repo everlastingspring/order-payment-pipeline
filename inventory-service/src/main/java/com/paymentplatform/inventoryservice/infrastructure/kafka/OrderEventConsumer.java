@@ -13,19 +13,41 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 /**
- * Consumes order events relevant to inventory:
- *  - order.created   → reserve stock for each item
- *  - order.cancelled → release reserved stock (explicit user cancel)
- *  - order.failed    → release reserved stock (saga failure: payment declined etc.)
+ * Kafka consumer for order lifecycle events that affect inventory.
+ *
+ * <p><strong>Topics consumed:</strong></p>
+ * <ul>
+ *   <li>{@code order.created} → {@link InventoryService#reserveInventory(OrderCreatedEvent)} —
+ *       lock stock for all items; publishes {@code inventory.reserved} or {@code inventory.failed}.</li>
+ *   <li>{@code order.cancelled} → {@link InventoryService#releaseInventory(OrderCancelledEvent)} —
+ *       saga compensation: return reserved units to available stock (user-initiated cancel).</li>
+ *   <li>{@code order.failed} — partial compensation: only releases if {@code failedStep=PAYMENT}.
+ *       If the inventory step itself failed, stock was never reserved, so nothing to release.</li>
+ * </ul>
+ *
+ * <p>Manual acknowledgment is used ({@code AckMode.MANUAL_IMMEDIATE}) so that a successfully
+ * processed event is committed immediately and a failed event throws to trigger Resilience4j retry.</p>
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class OrderEventConsumer {
 
+    /** Handles all inventory business logic — reservation, release, compensation. */
     private final InventoryService inventoryService;
+
+    /** Deserialises the raw Kafka JSON payload into typed event objects. */
     private final ObjectMapper objectMapper;
 
+    /**
+     * Handles {@code order.created} — triggers the inventory reservation step of the saga.
+     * Delegates to {@code InventoryService.reserveInventory()} which performs a two-pass
+     * check-then-commit and writes either {@code inventory.reserved} or {@code inventory.failed}
+     * to the outbox.
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle; ack'd only on success
+     */
     @KafkaListener(
             topics = KafkaTopics.ORDER_CREATED,
             groupId = "inventory-service-group",
@@ -45,6 +67,13 @@ public class OrderEventConsumer {
         }
     }
 
+    /**
+     * Handles {@code order.cancelled} — returns all ACTIVE reserved units to available stock.
+     * This is the standard saga compensation path for user-initiated order cancellation.
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle
+     */
     @KafkaListener(
             topics = KafkaTopics.ORDER_CANCELLED,
             groupId = "inventory-service-group",
@@ -64,6 +93,16 @@ public class OrderEventConsumer {
         }
     }
 
+    /**
+     * Handles {@code order.failed} — conditionally releases inventory.
+     *
+     * <p>Release happens only when {@code failedStep=PAYMENT}: stock was reserved but payment
+     * was declined, so inventory must be returned. When {@code failedStep=INVENTORY} the stock
+     * was never reserved, so there is nothing to release.</p>
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle
+     */
     @KafkaListener(
             topics = KafkaTopics.ORDER_FAILED,
             groupId = "inventory-service-group",

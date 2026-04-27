@@ -21,12 +21,24 @@ import java.time.Instant;
  */
 public class GatewayAccessDeniedHandler implements ServerAccessDeniedHandler {
 
+    /** Spring-managed Jackson mapper used to serialise the {@link ErrorResponse} body. */
     private final ObjectMapper objectMapper;
 
+    /**
+     * @param objectMapper Spring-managed Jackson mapper for {@link ErrorResponse} serialisation
+     */
     public GatewayAccessDeniedHandler(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Writes a 403 {@link ErrorResponse} JSON body. Called by Spring Security when an
+     * authenticated user requests a route they are not authorised to access.
+     *
+     * @param exchange the current server web exchange
+     * @param denied   the access denied exception
+     * @return Mono that completes after writing the response body
+     */
     @Override
     public Mono<Void> handle(ServerWebExchange exchange, AccessDeniedException denied) {
         return Mono.defer(() -> {

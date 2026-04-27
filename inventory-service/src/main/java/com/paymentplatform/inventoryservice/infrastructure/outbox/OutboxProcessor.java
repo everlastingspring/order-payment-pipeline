@@ -16,16 +16,44 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Scheduled processor that polls {@code PENDING} outbox rows and publishes them to Kafka.
+ *
+ * <p><strong>Poll cycle (default 5 s):</strong> Fetches up to 50 {@code PENDING} events ordered by
+ * {@code createdAt ASC} (oldest first). For each event, calls {@link KafkaEventPublisher#publish}
+ * and blocks on the {@code CompletableFuture}. Success → {@code PUBLISHED}; failure → increments
+ * {@code retryCount}. Once {@code retryCount >= MAX_RETRIES} (5), the event is marked {@code FAILED}.</p>
+ *
+ * <p><strong>Circuit breaker:</strong> The entire {@code processOutbox()} method is guarded by a
+ * Resilience4j circuit breaker named {@code kafkaPublisher}. When the circuit is OPEN (Kafka is down),
+ * the fallback logs a warning and skips the poll to avoid cascading failures.</p>
+ *
+ * <p><strong>At-least-once semantics:</strong> If the service crashes after Kafka acks but before
+ * the DB update, the row stays {@code PENDING} and will be re-published on recovery. Consumers
+ * must be idempotent (e.g. via the {@code IdempotencyKey} table in payment-service).</p>
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class OutboxProcessor {
 
+    /** Repository for reading PENDING events and updating their status after publish. */
     private final OutboxEventRepository outboxEventRepository;
+
+    /** Kafka publisher that wraps {@code KafkaTemplate.send()}. */
     private final KafkaEventPublisher kafkaEventPublisher;
 
+    /**
+     * Maximum number of consecutive publish failures before an event is permanently marked FAILED.
+     * Prevents indefinite retries of events with corrupt payloads or mismatched topics.
+     */
     private static final int MAX_RETRIES = 5;
 
+    /**
+     * Main poll cycle — fetches up to 50 PENDING events and attempts to publish each one.
+     * Runs every {@code outbox.processor.poll-interval-ms} milliseconds (default 5000).
+     * Protected by the {@code kafkaPublisher} circuit breaker.
+     */
     @Scheduled(fixedDelayString = "${outbox.processor.poll-interval-ms:5000}")
     @Transactional
     @CircuitBreaker(name = "kafkaPublisher", fallbackMethod = "processOutboxFallback")
@@ -77,10 +105,21 @@ public class OutboxProcessor {
         }
     }
 
+    /**
+     * Fallback invoked when the {@code kafkaPublisher} circuit breaker is OPEN.
+     * Logs a warning and returns without processing to avoid hammering a down Kafka cluster.
+     *
+     * @param e the exception that triggered the open-circuit transition
+     */
     private void processOutboxFallback(CallNotPermittedException e) {
         log.warn("Outbox processing skipped — Kafka circuit breaker is OPEN: {}", e.getMessage());
     }
 
+    /**
+     * Generic fallback for unexpected exceptions during outbox processing.
+     *
+     * @param e the caught exception
+     */
     private void processOutboxFallback(Exception e) {
         log.error("Outbox processing failed: {}", e.getMessage());
     }

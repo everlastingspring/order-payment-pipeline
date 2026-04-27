@@ -10,7 +10,7 @@ import com.paymentplatform.notificationservice.domain.entity.NotificationLog;
 import com.paymentplatform.notificationservice.domain.repository.NotificationLogRepository;
 import com.paymentplatform.notificationservice.domain.repository.NotificationRepository;
 import com.paymentplatform.notificationservice.infrastructure.kafka.DlqPublisher;
-import com.paymentplatform.notificationservice.infrastructure.sender.NotificationSender;
+import com.paymentplatform.notificationservice.infrastructure.sender.EmailNotificationChannel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -41,7 +41,7 @@ class NotificationServiceTest {
 
     @Mock private NotificationRepository notificationRepository;
     @Mock private NotificationLogRepository notificationLogRepository;
-    @Mock private NotificationSender sender;
+    @Mock private EmailNotificationChannel emailChannel;
     @Mock private DlqPublisher dlqPublisher;
     @Mock private NotificationMapper notificationMapper;
 
@@ -55,8 +55,12 @@ class NotificationServiceTest {
     void setUp() {
         notificationService = new NotificationService(
                 notificationRepository, notificationLogRepository,
-                sender, dlqPublisher, notificationMapper);
+                dlqPublisher, notificationMapper);
+        ReflectionTestUtils.setField(notificationService, "channels", List.of(emailChannel));
         ReflectionTestUtils.setField(notificationService, "maxAttempts", 3);
+        // emailChannel supports all types — lenient to avoid UnnecessaryStubbingException
+        // in tests that never reach attemptSend (null email, duplicate skip)
+        lenient().when(emailChannel.supports(any(NotificationType.class))).thenReturn(true);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -95,7 +99,7 @@ class NotificationServiceTest {
             when(notificationRepository.existsByReferenceIdAndType(REFERENCE_ID, NotificationType.ORDER_CONFIRMATION))
                     .thenReturn(false);
             stubNotificationSave();
-            when(sender.send(EMAIL, "Order Created", "Your order was created")).thenReturn(true);
+            when(emailChannel.send(EMAIL, "Order Created", "Your order was created")).thenReturn(true);
 
             notificationService.sendNotification(
                     CUSTOMER_ID, EMAIL, NotificationType.ORDER_CONFIRMATION,
@@ -124,7 +128,7 @@ class NotificationServiceTest {
                     REFERENCE_ID, "order.created", "evt-001");
 
             verify(notificationRepository, never()).save(any());
-            verify(sender, never()).send(anyString(), anyString(), anyString());
+            verify(emailChannel, never()).send(anyString(), anyString(), anyString());
         }
 
         @Test
@@ -139,7 +143,7 @@ class NotificationServiceTest {
                     "Order Created", "body",
                     REFERENCE_ID, "order.created", "evt-001");
 
-            verify(sender, never()).send(anyString(), anyString(), anyString());
+            verify(emailChannel, never()).send(anyString(), anyString(), anyString());
             ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
             verify(notificationRepository).save(captor.capture());
             assertThat(captor.getValue().getRecipientEmail()).isEqualTo("unknown");
@@ -151,7 +155,7 @@ class NotificationServiceTest {
             when(notificationRepository.existsByReferenceIdAndType(REFERENCE_ID, NotificationType.ORDER_CONFIRMATION))
                     .thenReturn(false);
             stubNotificationSave();
-            when(sender.send(anyString(), anyString(), anyString())).thenReturn(false);
+            when(emailChannel.send(anyString(), anyString(), anyString())).thenReturn(false);
 
             notificationService.sendNotification(
                     CUSTOMER_ID, EMAIL, NotificationType.ORDER_CONFIRMATION,
@@ -174,7 +178,7 @@ class NotificationServiceTest {
             // Set maxAttempts=1 so that a single markRetrying() (attemptCount 0→1) hits the threshold
             ReflectionTestUtils.setField(notificationService, "maxAttempts", 1);
             stubNotificationSave();
-            when(sender.send(anyString(), anyString(), anyString())).thenReturn(false);
+            when(emailChannel.send(anyString(), anyString(), anyString())).thenReturn(false);
 
             notificationService.sendNotification(
                     CUSTOMER_ID, EMAIL, NotificationType.ORDER_CONFIRMATION,
@@ -195,7 +199,7 @@ class NotificationServiceTest {
             when(notificationRepository.existsByReferenceIdAndType(REFERENCE_ID, NotificationType.ORDER_CONFIRMATION))
                     .thenReturn(false);
             stubNotificationSave();
-            when(sender.send(anyString(), anyString(), anyString())).thenReturn(true);
+            when(emailChannel.send(anyString(), anyString(), anyString())).thenReturn(true);
 
             notificationService.sendNotification(
                     CUSTOMER_ID, EMAIL, NotificationType.ORDER_CONFIRMATION,

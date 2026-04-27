@@ -23,13 +23,50 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.UUID;
 
+/**
+ * Core application service for wallet-service.
+ *
+ * <p><strong>Responsibilities:</strong></p>
+ * <ul>
+ *   <li>Debit the wallet synchronously when payment-service calls {@code POST /api/wallets/debit}.</li>
+ *   <li>Credit the wallet when a customer tops up via {@code POST /api/wallets/customer/{id}/topup}.</li>
+ *   <li>Issue refunds when an order is cancelled (consumes {@code order.cancelled} asynchronously via Kafka).</li>
+ *   <li>Expose wallet balance and ledger history via the REST API.</li>
+ *   <li>Rebuild balance projections from ledger entries for consistency checks.</li>
+ * </ul>
+ *
+ * <p><strong>Concurrency model:</strong> All mutation methods follow this pattern:</p>
+ * <ol>
+ *   <li>Call {@code findOrCreateWallet()} — idempotent creation guarded against concurrent races
+ *       by catching {@code DataIntegrityViolationException}.</li>
+ *   <li>Re-fetch with {@code findByCustomerIdForUpdate()} — acquires a Postgres row-level lock
+ *       ({@code SELECT ... FOR UPDATE}), serialising concurrent mutations for the same customer.</li>
+ *   <li>Check ledger idempotency — skip if the same {@code referenceId + transactionType} already exists.</li>
+ *   <li>Call the appropriate {@link Wallet} domain method and save.</li>
+ * </ol>
+ *
+ * <p><strong>Payment flow note:</strong> The wallet debit is a synchronous REST call from
+ * payment-service — it happens INSIDE the payment transaction, before {@code payment.completed}
+ * is published. This means the wallet is always debited before the saga event fires.</p>
+ *
+ * <p><strong>What this service does NOT do:</strong></p>
+ * <ul>
+ *   <li>It does not validate payment authorisation (that is payment-service's responsibility).</li>
+ *   <li>It does not produce Kafka events (wallet-service is a pure consumer in this saga).</li>
+ * </ul>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class WalletService {
 
+    /** Repository for wallet aggregate roots. */
     private final WalletRepository walletRepository;
+
+    /** Repository for ledger entries — used for idempotency checks and balance rebuild. */
     private final LedgerEntryRepository ledgerEntryRepository;
+
+    /** MapStruct mapper for converting wallet entities and ledger entries to DTOs. */
     private final WalletMapper walletMapper;
 
     // ── Payment debit (called synchronously by payment-service via REST) ──
@@ -180,6 +217,13 @@ public class WalletService {
                 .build();
     }
 
+    /**
+     * Retrieves a wallet by its UUID.
+     *
+     * @param walletId UUID of the wallet
+     * @return the wallet DTO
+     * @throws com.paymentplatform.commonlib.exception.ResourceNotFoundException if not found
+     */
     @Transactional(readOnly = true)
     public WalletDto getWallet(UUID walletId) {
         Wallet wallet = walletRepository.findById(walletId)
@@ -187,6 +231,13 @@ public class WalletService {
         return walletMapper.toDto(wallet);
     }
 
+    /**
+     * Retrieves a wallet by customer ID.
+     *
+     * @param customerId customer identifier
+     * @return the wallet DTO
+     * @throws com.paymentplatform.commonlib.exception.ResourceNotFoundException if not found
+     */
     @Transactional(readOnly = true)
     public WalletDto getWalletByCustomer(String customerId) {
         Wallet wallet = walletRepository.findByCustomerId(customerId)
@@ -194,6 +245,14 @@ public class WalletService {
         return walletMapper.toDto(wallet);
     }
 
+    /**
+     * Returns paginated ledger entries for a wallet, sorted newest first.
+     *
+     * @param walletId the wallet UUID
+     * @param pageable pagination parameters
+     * @return page of ledger entry DTOs
+     * @throws com.paymentplatform.commonlib.exception.ResourceNotFoundException if wallet not found
+     */
     @Transactional(readOnly = true)
     public Page<LedgerEntryDto> getLedgerEntries(UUID walletId, Pageable pageable) {
         if (!walletRepository.existsById(walletId)) {
@@ -230,6 +289,17 @@ public class WalletService {
 
     // ── Internal helpers ──
 
+    /**
+     * Returns the wallet for a customer, creating one if it does not yet exist.
+     *
+     * <p>Creation is idempotent: a {@code DataIntegrityViolationException} on the unique
+     * {@code customer_id} constraint means another concurrent request already created the wallet.
+     * In that case, this method re-fetches and returns the existing row.</p>
+     *
+     * @param customerId customer for whom to find or create a wallet
+     * @param currency   ISO 4217 currency code used only when a new wallet is created
+     * @return the existing or newly created {@link Wallet}
+     */
     private Wallet findOrCreateWallet(String customerId, String currency) {
         return walletRepository.findByCustomerId(customerId)
                 .orElseGet(() -> {

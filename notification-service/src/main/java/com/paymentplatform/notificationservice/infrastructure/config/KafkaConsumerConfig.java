@@ -13,12 +13,31 @@ import org.springframework.kafka.listener.ContainerProperties;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Kafka consumer infrastructure configuration for notification-service.
+ *
+ * <p>Consumer group ID is {@code "notification-service-group"}. Notification-service is the
+ * highest-fanout consumer in the platform — it consumes 6 topics:
+ * {@code order.created}, {@code order.completed}, {@code order.cancelled}, {@code order.failed},
+ * {@code payment.completed}, {@code payment.failed}.</p>
+ *
+ * <p>Uses {@code AckMode.MANUAL} with {@code enable.auto.commit=false} for at-least-once
+ * delivery semantics. If sending fails, the offset is not committed and the event will be
+ * redelivered on the next poll. After {@code maxAttempts} the event is published to the DLQ.
+ * Observation is enabled for distributed tracing via OpenTelemetry.</p>
+ */
 @Configuration
 public class KafkaConsumerConfig {
 
+    /** Kafka bootstrap servers from {@code spring.kafka.bootstrap-servers} in application.yml. */
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
+    /**
+     * Creates the consumer factory for the {@code notification-service-group} consumer group.
+     *
+     * @return configured {@link ConsumerFactory} with string deserializers and manual commit
+     */
     @Bean
     public ConsumerFactory<String, String> consumerFactory() {
         Map<String, Object> props = new HashMap<>();
@@ -31,6 +50,11 @@ public class KafkaConsumerConfig {
         return new DefaultKafkaConsumerFactory<>(props);
     }
 
+    /**
+     * Creates the listener container factory with manual ack mode and OTel observation.
+     *
+     * @return configured {@link ConcurrentKafkaListenerContainerFactory}
+     */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory() {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =

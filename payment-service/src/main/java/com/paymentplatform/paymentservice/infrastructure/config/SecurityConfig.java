@@ -14,10 +14,31 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+/**
+ * Spring Security configuration for payment-service.
+ *
+ * <p>Two filter chains — one per Spring profile:</p>
+ * <ul>
+ *   <li><b>{@code !prod}:</b> Permits all requests (no auth) for local dev and testing.</li>
+ *   <li><b>{@code prod}:</b> Gateway-trust model — {@link GatewayAuthFilter} reads
+ *       {@code X-User-Id}/{@code X-User-Roles} headers forwarded by the API gateway
+ *       after JWT validation. Service is unreachable directly via K8s NetworkPolicy.</li>
+ * </ul>
+ *
+ * <p>CSRF disabled (stateless REST API). Custom error handlers return {@code ErrorResponse}
+ * JSON for 401/403 rather than Spring Security's default HTML pages.</p>
+ */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
+    /**
+     * Local dev / test filter chain — permits all requests without authentication.
+     *
+     * @param http the {@link HttpSecurity} builder
+     * @return permit-all stateless filter chain
+     * @throws Exception if the filter chain cannot be built
+     */
     @Bean
     @Profile("!prod")
     public SecurityFilterChain devSecurityFilterChain(HttpSecurity http) throws Exception {
@@ -32,9 +53,14 @@ public class SecurityConfig {
     }
 
     /**
-     * Production: gateway-trust model.
-     * GatewayAuthFilter reads X-User-Id / X-User-Roles headers
-     * set by the API gateway after JWT validation.
+     * Production filter chain — gateway-trust model.
+     * {@link GatewayAuthFilter} reads {@code X-User-Id}/{@code X-User-Roles} headers
+     * forwarded by the API gateway and builds the {@code SecurityContext}.
+     *
+     * @param http         the {@link HttpSecurity} builder
+     * @param objectMapper Spring-managed Jackson mapper for {@code AuthEntryPoint} serialisation
+     * @return authenticated-only stateless filter chain
+     * @throws Exception if the filter chain cannot be built
      */
     @Bean
     @Profile("prod")

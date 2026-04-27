@@ -40,10 +40,21 @@ import java.util.Map;
 public class JwtHeaderRelayFilter implements GlobalFilter, Ordered {
 
     /**
-     * Run after Spring Security filter (order 0) but before routing filters.
+     * Filter order — runs after the Spring Security OAuth2 filter (order 0) which validates
+     * the JWT, but before the routing filters (order > 1) which forward to downstream services.
+     * This ensures user identity headers are set before the request leaves the gateway.
      */
     private static final int FILTER_ORDER = 1;
 
+    /**
+     * Strips any externally supplied identity headers, then injects new ones from the validated JWT.
+     * If the request is unauthenticated (anonymous), the stripped headers are still removed
+     * to prevent spoofing, and the request is forwarded without identity headers.
+     *
+     * @param exchange the current server web exchange
+     * @param chain    the gateway filter chain
+     * @return Mono that completes after forwarding the mutated request
+     */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         // Always strip internal auth headers to prevent external spoofing

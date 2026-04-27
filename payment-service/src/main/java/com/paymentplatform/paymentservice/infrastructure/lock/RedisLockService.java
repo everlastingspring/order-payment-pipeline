@@ -9,21 +9,40 @@ import java.time.Duration;
 import java.util.UUID;
 
 /**
- * Distributed lock using Redis SET NX EX.
+ * Redis-based distributed lock implementation using {@code SET NX EX} (set-if-absent with TTL).
  *
- * Prevents concurrent payment processing for the same order
- * across multiple service instances. The lock value is a unique
- * token so only the holder can release it (no accidental unlock
- * by another thread whose lock expired).
+ * <p><strong>Why a distributed lock:</strong> payment-service may run as multiple replicas.
+ * When Kafka redelivers {@code inventory.reserved} (at-least-once), two instances could race
+ * to process the same order. The idempotency key table is the primary safeguard, but it has a
+ * TOCTOU window between the check and the charge. The Redis lock closes this window by serialising
+ * concurrent processors for the same {@code orderId}.</p>
+ *
+ * <p><strong>Fencing token:</strong> The lock value is a random UUID generated at acquisition time.
+ * {@link #release} validates that the caller's token matches the stored value — preventing an
+ * instance from accidentally releasing a lock it no longer holds (e.g., after TTL expiry and
+ * re-acquisition by another instance). This is a simplified fencing token pattern.</p>
+ *
+ * <p><strong>TTL (30 s default):</strong> If the lock holder crashes before releasing, Redis will
+ * automatically expire the lock after 30 s. This prevents indefinite lock starvation at the cost
+ * of a potential (harmless, idempotency-protected) duplicate attempt after recovery.</p>
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class RedisLockService {
 
+    /** Spring Redis template for {@code SET NX EX} and {@code GET}/{@code DEL} operations. */
     private final StringRedisTemplate redisTemplate;
 
+    /**
+     * Namespace prefix for all payment lock keys. Full key format: {@code "payment:lock:<orderId>"}.
+     */
     private static final String LOCK_PREFIX = "payment:lock:";
+
+    /**
+     * Default lock TTL. If a lock holder crashes, the lock auto-expires after 30 seconds,
+     * allowing another instance to retry. Idempotency prevents the retry from double-charging.
+     */
     private static final Duration DEFAULT_TTL = Duration.ofSeconds(30);
 
     /**

@@ -13,15 +13,45 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
+/**
+ * REST controller exposing wallet read and write endpoints.
+ *
+ * <p>Base path: {@code /api/wallets}</p>
+ *
+ * <p><strong>Public endpoints</strong> (via API gateway, requires JWT):</p>
+ * <ul>
+ *   <li>{@code GET /api/wallets/{walletId}} — full wallet with balance</li>
+ *   <li>{@code GET /api/wallets/customer/{customerId}} — wallet by customer</li>
+ *   <li>{@code GET /api/wallets/customer/{customerId}/balance} — lightweight balance check</li>
+ *   <li>{@code GET /api/wallets/{walletId}/ledger} — paginated transaction history</li>
+ *   <li>{@code POST /api/wallets/customer/{customerId}/topup} — add funds</li>
+ * </ul>
+ *
+ * <p><strong>Internal endpoints</strong> (called by other services, not customers):</p>
+ * <ul>
+ *   <li>{@code POST /api/wallets/debit} — called by payment-service during saga execution</li>
+ *   <li>{@code POST /api/wallets/{walletId}/rebuild} — admin: recompute balance from ledger</li>
+ * </ul>
+ *
+ * <p>In production the {@code /debit} endpoint should be protected by network policy
+ * (K8s ClusterIP, not publicly reachable through the API gateway).</p>
+ */
 @RestController
 @RequestMapping("/api/wallets")
 @RequiredArgsConstructor
 public class WalletController {
 
+    /** Application service handling all wallet business logic. */
     private final WalletService walletService;
 
     // ── Read ──
 
+    /**
+     * Retrieves a wallet by its UUID.
+     *
+     * @param walletId UUID of the wallet
+     * @return 200 OK with wallet DTO including balance and currency, or 404 if not found
+     */
     @GetMapping("/{walletId}")
     public ResponseEntity<ApiResponse<WalletDto>> getWallet(@PathVariable("walletId") UUID walletId) {
         WalletDto wallet = walletService.getWallet(walletId);
@@ -29,6 +59,12 @@ public class WalletController {
                 .success(true).message("Wallet retrieved").data(wallet).build());
     }
 
+    /**
+     * Retrieves a wallet by customer ID.
+     *
+     * @param customerId customer identifier
+     * @return 200 OK with wallet DTO, or 404 if no wallet exists for this customer
+     */
     @GetMapping("/customer/{customerId}")
     public ResponseEntity<ApiResponse<WalletDto>> getWalletByCustomer(
             @PathVariable("customerId") String customerId) {
@@ -52,6 +88,15 @@ public class WalletController {
                 .success(true).message("Balance retrieved").data(balance).build());
     }
 
+    /**
+     * Returns paginated ledger entries for a wallet, sorted newest first.
+     * Used by the Postman smoke test to verify the debit entry after saga completion.
+     *
+     * @param walletId UUID of the wallet
+     * @param page     zero-based page number (default 0)
+     * @param size     page size (default 20)
+     * @return 200 OK with paged ledger entry DTOs
+     */
     @GetMapping("/{walletId}/ledger")
     public ResponseEntity<ApiResponse<PagedResponse<LedgerEntryDto>>> getLedger(
             @PathVariable("walletId") UUID walletId,

@@ -36,41 +36,72 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Core payment processing service.
+ * Core application service for payment-service.
  *
- * Sequential saga flow — triggered by inventory.reserved (NOT order.created):
- *   1. Acquire Redis distributed lock on orderId (prevents concurrent processing)
- *   2. Check idempotency_keys table (prevents double charge on redelivery)
- *   3. Create Payment entity (status=PROCESSING)
- *   4. Call gateway simulator (charge)
- *   5. Update Payment (COMPLETED or FAILED)
- *   6. Save outbox event (payment.completed or payment.failed)
- *   7. Save idempotency key (caches the result for 24h)
- *   8. Release Redis lock
+ * <p><strong>Sequential saga flow</strong> — triggered by {@code inventory.reserved}
+ * (NOT {@code order.created}): stock is locked before payment is ever attempted.</p>
  *
- * Steps 3–7 are in a single @Transactional — all-or-nothing in the DB.
- * The Redis lock (steps 1, 8) wraps the transaction to prevent races.
+ * <pre>
+ * 1. Check idempotency_keys (fast path — skip if already processed)
+ * 2. Acquire Redis distributed lock on orderId (prevent concurrent processing)
+ * 3. Double-check idempotency inside lock (check-then-act is atomic)
+ * 4. [Transactional] Create Payment (status=PROCESSING)
+ * 5. [Transactional] Route to PaymentProcessor (WALLET → WalletPaymentProcessor)
+ * 6. [Transactional] Update Payment (COMPLETED or FAILED)
+ * 7. [Transactional] Save outbox event (payment.completed or payment.failed)
+ * 8. [Transactional] Save idempotency key (TTL 24 h)
+ * 9. Release Redis lock
+ * </pre>
+ *
+ * <p>Steps 4–8 are inside a single {@code @Transactional} method ({@link #executePayment}).
+ * The Redis lock (steps 2, 9) wraps the transaction to prevent two instances racing on the same
+ * Kafka redelivery.</p>
+ *
+ * <p><strong>Strategy pattern for processors:</strong> All {@link PaymentProcessor} beans are
+ * injected as a list. On each payment, the service finds the first whose {@code supports(method)}
+ * returns {@code true}. Currently only {@code WalletPaymentProcessor} is active.</p>
+ *
+ * <p><strong>What this service does NOT do:</strong></p>
+ * <ul>
+ *   <li>It does not create orders or consume {@code order.created}.</li>
+ *   <li>It does not refund — wallet refunds are handled by wallet-service consuming {@code order.cancelled}.</li>
+ * </ul>
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class PaymentService {
 
+    /** Repository for payment records. */
     private final PaymentRepository paymentRepository;
+
+    /** Repository for idempotency key records that prevent double-charging. */
     private final IdempotencyKeyRepository idempotencyKeyRepository;
+
+    /** Repository for outbox events — payment.completed / payment.failed. */
     private final OutboxEventRepository outboxEventRepository;
+
+    /** Redis-based distributed lock to prevent concurrent payment processing for the same order. */
     private final RedisLockService redisLockService;
+
+    /** MapStruct mapper for converting {@link Payment} entities to DTOs. */
     private final PaymentMapper paymentMapper;
+
+    /** Jackson mapper for serialising events and DTOs to JSON. */
     private final ObjectMapper objectMapper;
 
     /**
-     * All PaymentProcessor beans injected by Spring.
-     * To add UPI/CARD: create a new @Component implementing PaymentProcessor.
+     * All {@link PaymentProcessor} beans injected by Spring.
+     * To add UPI/CARD support: create a new {@code @Component} implementing {@link PaymentProcessor}.
      * No changes needed here.
      */
     @Autowired
     private List<PaymentProcessor> processors;
 
+    /**
+     * TTL for idempotency key records, in seconds.
+     * Configurable via {@code payment.idempotency.ttl-seconds} (default 86400 = 24 h).
+     */
     @Value("${payment.idempotency.ttl-seconds:86400}")
     private long idempotencyTtlSeconds;
 
@@ -173,6 +204,13 @@ public class PaymentService {
 
     // ── Read operations ──
 
+    /**
+     * Retrieves a payment by its UUID.
+     *
+     * @param paymentId UUID of the payment record
+     * @return the payment DTO
+     * @throws com.paymentplatform.commonlib.exception.ResourceNotFoundException if not found
+     */
     @Transactional(readOnly = true)
     public PaymentDto getPayment(UUID paymentId) {
         Payment payment = paymentRepository.findById(paymentId)
@@ -180,6 +218,13 @@ public class PaymentService {
         return paymentMapper.toDto(payment);
     }
 
+    /**
+     * Retrieves the payment associated with a specific order.
+     *
+     * @param orderId order identifier (String UUID)
+     * @return the payment DTO
+     * @throws com.paymentplatform.commonlib.exception.ResourceNotFoundException if not found
+     */
     @Transactional(readOnly = true)
     public PaymentDto getPaymentByOrderId(String orderId) {
         Payment payment = paymentRepository.findByOrderId(orderId)
@@ -187,6 +232,13 @@ public class PaymentService {
         return paymentMapper.toDto(payment);
     }
 
+    /**
+     * Returns paginated payment history for a customer, sorted newest first.
+     *
+     * @param customerId customer identifier
+     * @param pageable   pagination parameters
+     * @return page of payment DTOs
+     */
     @Transactional(readOnly = true)
     public Page<PaymentDto> getPaymentsByCustomer(String customerId, Pageable pageable) {
         return paymentRepository.findByCustomerIdOrderByCreatedAtDesc(customerId, pageable)
@@ -195,6 +247,10 @@ public class PaymentService {
 
     // ── Outbox event helpers ──
 
+    /**
+     * Builds and saves a {@code payment.completed} outbox event.
+     * Carries customer email through to notification-service.
+     */
     private void publishPaymentCompleted(Payment payment, String customerEmail) {
         PaymentCompletedEvent event = PaymentCompletedEvent.builder()
                 .paymentId(payment.getId().toString())
@@ -213,6 +269,10 @@ public class PaymentService {
         saveOutboxEvent(payment.getId().toString(), KafkaTopics.PAYMENT_COMPLETED, event);
     }
 
+    /**
+     * Builds and saves a {@code payment.failed} outbox event.
+     * Order-service will set the order to FAILED on consuming this event.
+     */
     private void publishPaymentFailed(Payment payment, String customerEmail) {
         PaymentFailedEvent event = PaymentFailedEvent.builder()
                 .paymentId(payment.getId().toString())
@@ -250,6 +310,14 @@ public class PaymentService {
         }
     }
 
+    /**
+     * Saves an idempotency key record that caches the payment outcome for {@code idempotencyTtlSeconds}.
+     * On Kafka redelivery, {@link #processPayment} checks this table first and skips reprocessing
+     * if a non-expired key exists — preventing double-charging the customer.
+     *
+     * @param key     the idempotency key string ({@code "order:<orderId>"})
+     * @param payment the completed or failed payment entity
+     */
     private void saveIdempotencyKey(String key, Payment payment) {
         try {
             IdempotencyKey idempotency = IdempotencyKey.builder()

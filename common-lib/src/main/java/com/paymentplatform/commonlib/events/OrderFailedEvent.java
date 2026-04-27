@@ -24,11 +24,29 @@ import java.time.Instant;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class OrderFailedEvent extends BaseEvent {
 
+    /** The order that failed. */
     private String orderId;
+
+    /** Customer who placed the order. */
     private String customerId;
+
+    /** Customer email for failure notification. */
     private String customerEmail;
+
+    /** Human-readable reason (e.g. "Inventory unavailable: out of stock"). */
     private String failureReason;
-    private String failedStep;    // "INVENTORY" | "PAYMENT"
+
+    /**
+     * Which saga step failed.
+     * <ul>
+     *   <li>{@code "INVENTORY"}: stock was never reserved — no stock to release.</li>
+     *   <li>{@code "PAYMENT"}: stock WAS reserved — inventory-service must release it.</li>
+     * </ul>
+     * inventory-service checks this before deciding whether to run compensation.
+     */
+    private String failedStep;
+
+    /** Timestamp when the failure was recorded. */
     private Instant failedAt;
 
     public OrderFailedEvent(String orderId, String customerId, String customerEmail,

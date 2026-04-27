@@ -12,12 +12,29 @@ import org.springframework.kafka.core.ProducerFactory;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Kafka producer infrastructure configuration for payment-service.
+ *
+ * <p>Identical settings to order-service: {@code acks=all}, {@code retries=3},
+ * {@code enable.idempotence=true}, {@code max.in.flight.requests=1}.
+ * These provide strong durability and exactly-once Kafka delivery semantics.
+ * OTel observation is enabled for distributed tracing.</p>
+ *
+ * <p>Payment-service produces {@code payment.completed} and {@code payment.failed}
+ * events via the transactional outbox pattern.</p>
+ */
 @Configuration
 public class KafkaProducerConfig {
 
+    /** Kafka bootstrap servers from {@code spring.kafka.bootstrap-servers} in application.yml. */
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
+    /**
+     * Creates the producer factory with idempotent, strongly-durable settings.
+     *
+     * @return configured {@link ProducerFactory}
+     */
     @Bean
     public ProducerFactory<String, String> producerFactory() {
         Map<String, Object> props = new HashMap<>();
@@ -31,6 +48,11 @@ public class KafkaProducerConfig {
         return new DefaultKafkaProducerFactory<>(props);
     }
 
+    /**
+     * Creates the {@link KafkaTemplate} used by {@code KafkaEventPublisher} with OTel observation.
+     *
+     * @return {@link KafkaTemplate} with tracing support enabled
+     */
     @Bean
     public KafkaTemplate<String, String> kafkaTemplate() {
         KafkaTemplate<String, String> template = new KafkaTemplate<>(producerFactory());

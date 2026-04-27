@@ -11,21 +11,42 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 /**
- * Sequential saga — payment-service is triggered by inventory.reserved, NOT order.created.
+ * Kafka consumer that triggers payment processing in the choreography saga.
  *
- * Flow: order.created → inventory.reserved → [this] payment.completed/payment.failed
+ * <p><strong>Sequential saga trigger:</strong> payment-service consumes {@code inventory.reserved},
+ * NOT {@code order.created}. This design guarantees that stock is locked before payment is ever
+ * attempted — preventing the scenario where a customer is charged for an out-of-stock item.</p>
  *
- * Payment only runs after inventory is confirmed reserved.
- * This prevents charging a customer when stock is unavailable.
+ * <p><strong>Saga flow:</strong></p>
+ * <pre>
+ *   order.created (order-service)
+ *       → inventory.reserved (inventory-service)
+ *           → [THIS] payment.completed / payment.failed (payment-service)
+ * </pre>
+ *
+ * <p>On failure (exception thrown), the message is not ack'd and Kafka redelivers it.
+ * {@code PaymentService.processPayment()} handles idempotency on redelivery via the
+ * {@code idempotency_keys} table.</p>
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class OrderEventConsumer {
 
+    /** Core payment service that handles the saga logic, idempotency, and outbox. */
     private final PaymentService paymentService;
+
+    /** Deserialises the raw Kafka JSON payload into typed event objects. */
     private final ObjectMapper objectMapper;
 
+    /**
+     * Handles {@code inventory.reserved} — the trigger for the payment step of the saga.
+     * Delegates to {@code PaymentService.processPayment()} which acquires a Redis lock,
+     * checks idempotency, charges the wallet, and writes outbox events.
+     *
+     * @param payload raw JSON string from Kafka
+     * @param ack     manual acknowledgment handle; ack'd only on success
+     */
     @KafkaListener(
             topics = KafkaTopics.INVENTORY_RESERVED,
             groupId = "payment-service-group",

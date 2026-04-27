@@ -10,22 +10,38 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 /**
- * Publishes to the notification.dlq topic when a notification
- * exhausts all retry attempts. DLQ messages can be picked up
- * by a retry-worker or monitored via alerting.
+ * Publishes dead-lettered notification events to the {@code notification.dlq} Kafka topic.
  *
- * No outbox needed here — a failed DLQ publish just means the
- * notification stays in FAILED status in the DB and can be
- * retried manually.
+ * <p>Called by {@code NotificationService} after a notification has exhausted all retry attempts
+ * ({@code attemptCount >= maxAttempts}). The DLQ message carries the full original payload,
+ * failure reason, attempt count, and timestamps — enough for a retry-worker or support engineer
+ * to replay the notification without consulting the database.</p>
+ *
+ * <p><strong>No outbox pattern here:</strong> Unlike inventory/payment events, a failed DLQ publish
+ * does not affect saga correctness. If Kafka is down when the DLQ publish is attempted, the
+ * notification stays {@code DEAD_LETTERED} in the DB and can be replayed manually. The tradeoff
+ * (potential missed DLQ message) is acceptable for an observability side-channel.</p>
+ *
+ * <p><strong>Consumers:</strong> A future {@code notification-retry-worker} service (not yet
+ * implemented) would consume this topic and re-attempt delivery. Grafana can alert on DLQ lag.</p>
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class DlqPublisher {
 
+    /** Spring Kafka template for direct (non-outbox) publish to the DLQ topic. */
     private final KafkaTemplate<String, String> kafkaTemplate;
+
+    /** Jackson mapper for serialising {@link NotificationDlqEvent} to JSON. */
     private final ObjectMapper objectMapper;
 
+    /**
+     * Serialises and publishes a {@link NotificationDlqEvent} to {@code notification.dlq}.
+     * Uses the original event ID as the Kafka message key for partition routing and traceability.
+     *
+     * @param event the dead-letter event built from the exhausted notification
+     */
     public void publishToDlq(NotificationDlqEvent event) {
         try {
             String payload = objectMapper.writeValueAsString(event);

@@ -8,21 +8,37 @@ import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import reactor.core.publisher.Mono;
 
 /**
- * Defines how the Redis rate limiter identifies callers.
+ * Configures the {@link KeyResolver} used by Spring Cloud Gateway's Redis rate limiter.
  *
- * Strategy: per-user rate limiting (all environments).
+ * <p><strong>Strategy:</strong> per-user rate limiting across all environments.</p>
  *
- * Resolution order:
- *   1. Authenticated user ID from SecurityContext (JWT "sub" claim)
- *   2. X-User-Id header (for testing without JWT / local dev)
- *   3. Client IP as last resort
+ * <p><strong>Key resolution order:</strong></p>
+ * <ol>
+ *   <li>Authenticated user ID from the reactive {@code SecurityContext} (JWT {@code sub} claim) —
+ *       primary path in production after JWT validation.</li>
+ *   <li>{@code X-User-Id} request header — useful in local dev and integration tests
+ *       where Keycloak is not running.</li>
+ *   <li>{@code X-Forwarded-For} header (first entry) — for requests behind a load balancer
+ *       where no identity is available.</li>
+ *   <li>Direct remote socket IP — final fallback for direct connections.</li>
+ *   <li>{@code "anonymous"} — ensures the rate limiter always has a key; anonymous
+ *       requests share one bucket.</li>
+ * </ol>
  *
- * This ensures rate limits follow the user, not the IP —
- * critical when multiple users share an IP (NAT, corporate proxy).
+ * <p>Tying limits to user ID rather than IP is essential in production where many
+ * users share the same IP (corporate NAT, mobile carrier NAT).</p>
  */
 @Configuration
 public class RateLimiterConfig {
 
+    /**
+     * Creates a {@link KeyResolver} that resolves the rate-limit bucket key for each request.
+     * Reads from the reactive {@code SecurityContext} rather than {@code exchange.getPrincipal()}
+     * to ensure testability — {@code MockServerWebExchange} does not populate the principal
+     * from the Reactor context.
+     *
+     * @return reactive key resolver bean
+     */
     @Bean
     public KeyResolver userKeyResolver() {
         return exchange -> ReactiveSecurityContextHolder.getContext()

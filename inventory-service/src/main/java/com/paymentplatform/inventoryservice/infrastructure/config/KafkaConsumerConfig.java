@@ -13,12 +13,28 @@ import org.springframework.kafka.listener.ContainerProperties;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Kafka consumer infrastructure configuration for inventory-service.
+ *
+ * <p>Consumer group ID is {@code "inventory-service-group"}. Inventory-service consumes
+ * {@code order.created} (to reserve stock), {@code order.cancelled} (to release stock),
+ * and {@code order.failed} (to release stock when {@code failedStep=PAYMENT}).</p>
+ *
+ * <p>Uses {@code AckMode.MANUAL} with {@code enable.auto.commit=false} for at-least-once
+ * delivery semantics. Observation is enabled for distributed tracing via OpenTelemetry.</p>
+ */
 @Configuration
 public class KafkaConsumerConfig {
 
+    /** Kafka bootstrap servers from {@code spring.kafka.bootstrap-servers} in application.yml. */
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
+    /**
+     * Creates the consumer factory for the {@code inventory-service-group} consumer group.
+     *
+     * @return configured {@link ConsumerFactory} with string deserializers and manual commit
+     */
     @Bean
     public ConsumerFactory<String, String> consumerFactory() {
         Map<String, Object> props = new HashMap<>();
@@ -31,6 +47,11 @@ public class KafkaConsumerConfig {
         return new DefaultKafkaConsumerFactory<>(props);
     }
 
+    /**
+     * Creates the listener container factory with manual ack mode and OTel observation.
+     *
+     * @return configured {@link ConcurrentKafkaListenerContainerFactory}
+     */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory() {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
